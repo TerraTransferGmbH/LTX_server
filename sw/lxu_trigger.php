@@ -265,6 +265,12 @@ try {
 
 	$ign_cnt = 0;
 	$file_cnt = 0;
+	// Get current max_id before inserting new data (for push notification)
+	$stmt = $pdo->query("SELECT MAX(id) as maxid FROM m$mac");
+	$row = $stmt->fetch();
+	$prev_max_id = intval($row['maxid']);  // 0 if table empty
+	$min_written_id = null;
+	$max_written_id = null;
 	$sqlps = $pdo->prepare("INSERT INTO m$mac ( calc_ts, dataline  ) VALUES ( FROM_UNIXTIME( ? ), ? )");
 	// Regard only EDT-Files! 
 	foreach ($flist as $fname) {
@@ -408,6 +414,10 @@ try {
 			if ($qres == false) {	// Write failed
 				$err_new++;
 				if (count($info_wea) < 20) $info_wea[] = "ERROR: Write1 DB failed";
+			} else {
+				$last_id = $pdo->lastInsertId();
+				if ($min_written_id === null) $min_written_id = $last_id;
+				$max_written_id = $last_id;
 			}
 			$line_cnt++;
 		}
@@ -773,6 +783,12 @@ try {
 		if (count($qpar) && $qpar[0] != '*') { // No Push for '*'
 			$qpush = $qpar[0] . "?s=$mac";
 			if (count($qpar) >= 2) $qpush = $qpush . "&k=" . $qpar[1];	// Opt. Key
+			// Add written data IDs (0/0 if no data, prev_max/prev_max if no new data written)
+			if ($min_written_id !== null) {
+				$qpush .= "&minid=$min_written_id&maxid=$max_written_id";
+			} else {
+				$qpush .= "&minid=$prev_max_id&maxid=$prev_max_id";
+			}
 			$ch = curl_init($qpush);
 			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 			curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);

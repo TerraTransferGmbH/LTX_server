@@ -167,14 +167,12 @@ try {
 		$quota = @file("$fpath/$lmac/quota_days.dat", FILE_IGNORE_NEW_LINES);
 		if (isset($quota[2]) && strlen($quota[2])) {
 			$qpar = explode(' ', trim(preg_replace('/\s+/', ' ', $quota[2])));
-			if (count($qpar) >= 2) {
-				$akey = $ckey;
+			// Check all keys from position 1 onwards
+			for ($i = 1; $i < count($qpar); $i++) {
+				if ($ckey === $qpar[$i]) return true;
 			}
 		}
-		if (!isset($akey) || $akey !== $qpar[1]) {
-			return false;
-		}
-		return true;
+		return false;
 	}
 
 	// Prueft Zahlenwert auf Grenzen - HELPER

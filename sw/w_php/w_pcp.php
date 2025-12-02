@@ -48,6 +48,7 @@ http://localhost/ltx/sw/w_php/w_pcp.php?s=26FEA299F444F836&k=ABC&cmd=iparamunpen
  * iparamrunpend:	iparam-pendinge-loeschen
  * iparamchange:	Parameter aendern und speichern
  * getdata:	mMAC ausgeben mit opt. minid und/oder maxid
+ * getfile:	Datei(en) aus files/ lesen (file=data.edt, bak=1 fuer .bak dazu, limit=N)
  * 
  * Status-Returns:
  * 0:	OK
@@ -179,18 +180,16 @@ try {
 	function checkAccess($lmac, $ckey)
 	{
 		global $fpath;
-		if($ckey == S_API_KEY) return true;	// S_API_KEY valid for ALL
+		if ($ckey == S_API_KEY) return true;	// S_API_KEY valid for ALL
 		$quota = @file("$fpath/$lmac/quota_days.dat", FILE_IGNORE_NEW_LINES);
 		if (isset($quota[2]) && strlen($quota[2])) {
 			$qpar = explode(' ', trim(preg_replace('/\s+/', ' ', $quota[2])));
-			if (count($qpar) >= 2) {
-				$akey = $ckey;
+			// Check all keys from position 1 onwards
+			for ($i = 1; $i < count($qpar); $i++) {
+				if ($ckey === $qpar[$i]) return true;
 			}
 		}
-		if (!isset($akey) || $akey !== $qpar[1]) {
-			return false;
-		}
-		return true;
+		return false;
 	}
 
 	function getcurrentiparam()
@@ -575,6 +574,106 @@ try {
 			$retResult['get_data'] = $valarr;
 			$xlog .= "]: " . count($valarr) . " Lines)";
 
+			break;
+
+		case 'getfile':
+			// Read EDT file(s) from files/ directory
+			$fname = @$_REQUEST['file'];
+			if (!strlen($fname)) $fname = "data.edt";
+			// Security: only allow specific filenames
+			if (!in_array($fname, ['data.edt', 'data.edt.bak', 'iparam.lxp', 'sys_param.lxp'])) {
+				$status = "110 Invalid filename";
+				break;
+			}
+			$bak = isset($_REQUEST['bak']) && $_REQUEST['bak'];  // Include .bak file
+			$limit = isset($_REQUEST['limit']) ? intval($_REQUEST['limit']) : 0;
+
+			$alllines = array();
+			$files_read = array();
+
+			// Read .bak file first if 'bak' requested (older data first)
+			if ($bak && $fname == "data.edt") {
+				$bakfile = "$fpath/$mac/files/data.edt.bak";
+				if (file_exists($bakfile)) {
+					$baklines = @file($bakfile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+					if ($baklines !== false) {
+						$alllines = array_merge($alllines, $baklines);
+						$files_read[] = "data.edt.bak";
+					}
+				}
+			}
+
+			// Read main file
+			$mainfile = "$fpath/$mac/files/$fname";
+			if (file_exists($mainfile)) {
+				$mainlines = @file($mainfile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+				if ($mainlines !== false) {
+					$alllines = array_merge($alllines, $mainlines);
+					$files_read[] = $fname;
+				}
+			}
+
+			if (empty($files_read)) {
+				$status = "111 File(s) not found";
+				break;
+			}
+
+			// Apply limit (from end, newest data)
+			$total_lines = count($alllines);
+			if ($limit > 0 && $total_lines > $limit) {
+				$alllines = array_slice($alllines, -$limit);
+			}
+
+			// Parse lines into same format as getdata
+			$valarr = array();
+			$id = 0;
+			$unixt = 0;
+			foreach ($alllines as $line) {
+				$id++;
+				// Decompress if needed
+				if (strlen($line) && $line[0] === '$') {
+					$decoded = @base64_decode(substr($line, 1));
+					if ($decoded !== false) {
+						$line = @gzuncompress($decoded);
+						if ($line === false) $line = $decoded;
+					}
+				}
+
+				$ltyp = "msg";
+				$calc_ts = null;
+				$outline = $line;
+
+				if (strlen($line) && $line[0] == '!') {
+					if ($line[1] != 'U') {  // Not units line, contains values
+						$tmp = explode(' ', $line);
+						if ($tmp[0][1] == '+') {
+							$rtime = intval(substr($tmp[0], 2));
+							$unixt += $rtime;
+						} else {
+							$unixt = intval(substr($tmp[0], 1));
+						}
+						if ($unixt > 1526030617 && $unixt < 0xF0000000) {
+							$calc_ts = gmdate("Y-m-d H:i:s", $unixt);
+							$ltyp = "val";
+							$outline = substr($line, strpos($line, ' ') + 1);  // Remove timestamp
+						}
+					}
+				}
+
+				$valarr[] = array(
+					'id' => $id,
+					'line_ts' => null,
+					'calc_ts' => $calc_ts,
+					'type' => $ltyp,
+					'line' => $outline
+				);
+			}
+
+			$retResult['files'] = $files_read;
+			$retResult['total_lines'] = $total_lines;
+			$retResult['get_count'] = count($valarr);
+			$retResult['get_data'] = $valarr;
+			$xlog .= "(getfile:" . implode('+', $files_read) . ", $total_lines lines)";
 			break;
 
 		default:

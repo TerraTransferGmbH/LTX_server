@@ -4,8 +4,8 @@
 // Evtl. "schnelle Hilfe": error_reporting (E_ALL & ~E_DEPRECATED);
 
 error_reporting(E_ALL);
-include("conf/api_key.inc.php");
-include("lxu_loglib.php");
+include_once("conf/api_key.inc.php");
+include_once("lxu_loglib.php");
 
 // ----- reads u32 from $data  BE -----   32Bit.u from String
 function r4u_data($dix)
@@ -37,43 +37,13 @@ function show_str($rem, $str)
 	echo "\n";
 }
 
-// ---------------- Trigger: External async Script lxu_trigger.php -------------------------
+// ---------------- Trigger: Inline call to lxu_trigger.php -------------------------
 function trigger($reason, $vflag)
 {
-	global $xlog, $mac, $dbg; // xlog only as parameter
-
-	$self = $_SERVER['PHP_SELF'];
-	$port = $_SERVER['SERVER_PORT'];
-	$isHttps =  (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on')  || (isset($_SERVER['SERVER_PORT']) && (int) $_SERVER['SERVER_PORT'] === 443);
-	if ($isHttps) $server = "https://";
-	else $server = "http://";
-	$server .= $_SERVER['SERVER_NAME'];
-	$rpos = strrpos($self, '/'); // Evtl. check for  backslash (only Windows?)
-	$tscript = substr($self, 0, $rpos) . "/lxu_trigger.php";
-	$arg = "k=" . S_API_KEY . "&r=$reason&s=$mac";	// Parameter: API-KEY, reason and MAC
-	if ($vflag) $arg .= '&v';	// Enable VPNF-Mode
-	// return;	// Ein-kommentieren um Trigger Script NICHT starten wenn ohne DB
-
-	// First check if Trigger is available
-	$xlog = "";
-	if ($dbg > 1) echo "Start Trigger '$server:$port/$tscript?$arg'\n";
-	if ($dbg) $xlog = "(Trigger: '$server:$port/$tscript?$arg')";
-
-	$ch = curl_init("$server:$port/$tscript?$arg");
-	curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-	curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
-	curl_setopt($ch, CURLOPT_TIMEOUT, 1);
-	if ($dbg) {
-		$res = curl_exec($ch);	// Might be very long!
-		$xlog .= "(Curl Result:\nSTART=====>\n$res\n<=====END)";
-	} else curl_exec($ch);
-	if (curl_errno($ch)) $xlog .= '(CURL:' . curl_error($ch) . ')';
-	curl_close($ch);
-
-	if (strlen($xlog)) {
-		$xlog = '(call trigger)' . $xlog;
-		add_logfile();	// If triger fails: Add ne line to logfile
-	}
+	global $mac;
+	define('LXU_TRIGGER_INLINE', true);
+	include_once("lxu_trigger.php");
+	run_trigger($mac, $reason, $vflag ? '' : null);
 }
 
 // -------------------------------------- M A I N --------------------------------
@@ -869,6 +839,11 @@ $mtrun = round((microtime(true) - $mtmain_t0) * 1000, 4);
 $xlog .= "(Run:$mtrun msec)"; // Script Runtime
 add_logfile(); // Regular exit, entry in logfile should be first
 
-if (!$expmore) {	// Finished! Start async trigger
+// Flush response to device before running trigger (device doesn't wait)
+if (function_exists('fastcgi_finish_request')) {
+	fastcgi_finish_request();
+}
+
+if (!$expmore) {	// Finished! Start inline trigger
 	trigger(@$devi['reason'], isset($vpnf));	// If trigger fails: New entry in logfile
 }

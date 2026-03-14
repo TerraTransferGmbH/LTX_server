@@ -5,12 +5,15 @@
  *
  * 11.07.2025 - (C)JoEmbedded.com
  *
- * This is database version for a trigger that accepts 
+ * This is database version for a trigger that accepts
  * all incomming data and insertes it into a SQL database.
  * Tested with mySQL and MariaDB
  *
+ * Can be called via HTTP (standalone) or inline from lxu_v1.php
+ * (define LXU_TRIGGER_INLINE before include to skip HTTP entry point)
+ *
  * Last used Err: 106
- * 
+ *
  ***************************************************************/
 
 error_reporting(E_ALL);
@@ -18,162 +21,159 @@ error_reporting(E_ALL);
 ignore_user_abort(true);
 set_time_limit(120); // 2 Min runtime
 
-include("conf/api_key.inc.php");
-include("conf/config.inc.php");	// DB Access Param
-include("lxu_loglib.php");
+include_once("conf/api_key.inc.php");
+include_once("conf/config.inc.php");	// DB Access Param
+include_once("lxu_loglib.php");
 
-try {
-	// ----------------Functions----------------
-	function db_init()
-	{
-		global $pdo; // Nothing will work without the DB
-		if (isset($pdo)) return;
-		$pdo = new PDO("mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8", DB_USER, DB_PASSWORD);
-		$pdo->query("SET @@session.time_zone='+00:00'"); // UTC
+// ----------------Functions----------------
+function db_init()
+{
+	global $pdo; // Nothing will work without the DB
+	if (isset($pdo)) return;
+	$pdo = new PDO("mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8", DB_USER, DB_PASSWORD);
+	$pdo->query("SET @@session.time_zone='+00:00'"); // UTC
+}
+
+// Filename-sort-callback
+function flcmp($a, $b)
+{			// Compare Filenames, containing the dates
+	if ($a[0] == '.') return 1;	// Points at to the end
+	if ($b[0] == '.') return -1;
+	$ea = explode('_', $a);
+	$eb = explode('_', $b);
+	$res = intval($ea[0]) - intval($eb[0]);
+	if ($res) return $res;
+	$res = intval(@$ea[1]) - intval(@$eb[1]);
+	if ($res) return $res;
+	$res = intval(@$ea[2]) - intval(@$eb[2]);
+	return $res;
+}
+
+function send_alarm_mail($mail, $cont, $subj, $from)
+{
+	global $dbg;
+	$host = $_SERVER['SERVER_NAME'];
+	$mail_text = "Notification via '$host':\n";
+	$mail_text .= "$subj\n$cont\n(This Email was sent automatically. If received unintentionally, please ignore it. Contact Service: " . SERVICEMAIL . ")";
+	$header = "From: $from <" . AUTOMAIL . ">\r\n" .
+		// 'Reply-To: webmaster@example.com' . "\r\n" .
+		'X-Mailer: PHP/' . phpversion();
+
+	if ($dbg) {
+		echo "(DEBUG)<pre>MAIL: =$mail=\nSUBJ: =$subj=\nHEADER: =$header=\nTEXT:\n=$mail_text=\n</pre>";
+		$res = true;	// Patch
+	} else {
+		$res = @mail($mail, $subj, $mail_text, $header);
 	}
+	return $res; // OK: true
+}
 
-	// Filename-sort-callback
-	function flcmp($a, $b)
-	{			// Compare Filenames, containing the dates
-		if ($a[0] == '.') return 1;	// Points at to the end
-		if ($b[0] == '.') return -1;
-		$ea = explode('_', $a);
-		$eb = explode('_', $b);
-		$res = intval($ea[0]) - intval($eb[0]);
-		if ($res) return $res;
-		$res = intval(@$ea[1]) - intval(@$eb[1]);
-		if ($res) return $res;
-		$res = intval(@$ea[2]) - intval(@$eb[2]);
-		return $res;
+// -- $B64-Functions / Decompress -
+// Only allowed token 111 and tokens 0..89
+// HK-Values etc. in plain!
+function get_u16($valstr)
+{
+	$ui16 = unpack('n', $valstr)[1];
+	return $ui16;
+}
+
+function get_ef32($valstr)
+{
+	$hval = intval(unpack('N', $valstr)[1]);
+	if (($hval >> 24) == 0xFD) {
+		$errno = $hval & 0xFFFFFF;
+		return get_errstr($errno);
 	}
+	return round(decode_f32($hval), 8); // Float max. 8 Digits
+}
+function get_errstr($errno)
+{ // wie measure.c
+	switch ($errno) {
+		case 1:
+			return 'NoValue';
+		case 2:
+			return 'NoReply';
+		case 3:
+			return 'OldValue';
+			// 4,5
+		case 6:
+			return 'ErrorCRC';
+		case 7:
+			return 'DataError';
+		case 8:
+			return 'NoCachedValue';
+		default:
+			return "Err$errno";
+	}
+}
+function decode_f32($bin) // U32 -> Float IEEE 754
+{
+	$sign = ($bin & 0x80000000) > 0 ? -1 : 1;
+	$exp = (($bin & 0x7F800000) >> 23);
+	$mantis = ($bin & 0x7FFFFF);
 
-	function send_alarm_mail($mail, $cont, $subj, $from)
-	{
-		global $dbg;
-		$host = $_SERVER['SERVER_NAME'];
-		$mail_text = "Notification via '$host':\n";
-		$mail_text .= "$subj\n$cont\n(This Email was sent automatically. If received unintentionally, please ignore it. Contact Service: " . SERVICEMAIL . ")";
-		$header = "From: $from <" . AUTOMAIL . ">\r\n" .
-			// 'Reply-To: webmaster@example.com' . "\r\n" .
-			'X-Mailer: PHP/' . phpversion();
+	if ($mantis == 0 && $exp == 0) {
+		return 0;
+	}
+	if ($exp == 255) {
+		if ($mantis == 0) return INF;
+		if ($mantis != 0) return NAN;
+	}
+	if ($exp == 0) { // denormalisierte Zahl
+		$mantis /= 0x800000;
+		return $sign * pow(2, -126) * $mantis;
+	} else {
+		$mantis |= 0x800000;
+		$mantis /= 0x800000;
+		return $sign * pow(2, $exp - 127) * $mantis;
+	}
+}
 
-		if ($dbg) {
-			echo "(DEBUG)<pre>MAIL: =$mail=\nSUBJ: =$subj=\nHEADER: =$header=\nTEXT:\n=$mail_text=\n</pre>";
-			$res = true;	// Patch
-		} else {
-			$res = @mail($mail, $subj, $mail_text, $header);
+function decodeB64($ostr)
+{ // ENTRY - On Error return false
+	global $deltatime;
+	$dwbytes = base64_decode($ostr); // Bytes decodiert
+	$dwlen = strlen($dwbytes);
+	$tok = ord($dwbytes[0]);
+	if ($tok >= 132) return "<XDATA '" . $ostr . "'>"; // Embedded Data
+	$odstr = "";	// Ausgabestring - LTX-Konform
+	$idx = 0;
+	while ($dwlen-- > 0) {
+		$tok = ord($dwbytes[$idx++]);
+		if ($tok == 111) { // Deltatime am Anf un dnur merken
+			if ($dwlen < 2) break;
+			$deltatime = get_u16(substr($dwbytes, $idx, 2));
+			$idx += 2;
+			$dwlen -= 2;
+			continue;
 		}
-		return $res; // OK: true
+		if (!strlen($odstr)) $odstr = "+$deltatime";
+		if ($tok <= 89) { // 0-89 F32 Kanaele
+			if ($dwlen < 4) break;
+			$vals = get_ef32(substr($dwbytes, $idx, 4));
+			$idx += 4;
+			$dwlen -= 4;
+			$odstr .= " $tok:$vals";
+		} else break;
 	}
+	if ($dwlen > 0) return false; // Something left?
+	// echo "('$ostr' => '$odstr')\n"; // Dbg
+	return '!' . $odstr;
+}
 
-	// -- $B64-Functions / Decompress -
-	// Only allowed token 111 and tokens 0..89
-	// HK-Values etc. in plain!
-	function get_u16($valstr)
-	{
-		$ui16 = unpack('n', $valstr)[1];
-		return $ui16;
-	}
+// ----------------TRIGGER CORE LOGIC----------------
+function run_trigger($p_mac, $p_reason, $p_vpnf = null) {
+	global $dbg, $xlog, $mac, $now, $trigger_fb, $pdo, $deltatime, $vpnf;
 
-	function get_ef32($valstr)
-	{
-		$hval = intval(unpack('N', $valstr)[1]);
-		if (($hval >> 24) == 0xFD) {
-			$errno = $hval & 0xFFFFFF;
-			return get_errstr($errno);
-		}
-		return round(decode_f32($hval), 8); // Float max. 8 Digits
-	}
-	function get_errstr($errno)
-	{ // wie measure.c
-		switch ($errno) {
-			case 1:
-				return 'NoValue';
-			case 2:
-				return 'NoReply';
-			case 3:
-				return 'OldValue';
-				// 4,5
-			case 6:
-				return 'ErrorCRC';
-			case 7:
-				return 'DataError';
-			case 8:
-				return 'NoCachedValue';
-			default:
-				return "Err$errno";
-		}
-	}
-	function decode_f32($bin) // U32 -> Float IEEE 754
-	{
-		$sign = ($bin & 0x80000000) > 0 ? -1 : 1;
-		$exp = (($bin & 0x7F800000) >> 23);
-		$mantis = ($bin & 0x7FFFFF);
-
-		if ($mantis == 0 && $exp == 0) {
-			return 0;
-		}
-		if ($exp == 255) {
-			if ($mantis == 0) return INF;
-			if ($mantis != 0) return NAN;
-		}
-		if ($exp == 0) { // denormalisierte Zahl
-			$mantis /= 0x800000;
-			return $sign * pow(2, -126) * $mantis;
-		} else {
-			$mantis |= 0x800000;
-			$mantis /= 0x800000;
-			return $sign * pow(2, $exp - 127) * $mantis;
-		}
-	}
-
-	$deltatime = 0; // Zeilenuebergreifend
-	function decodeB64($ostr)
-	{ // ENTRY - On Error return false
-		global $deltatime;
-		$dwbytes = base64_decode($ostr); // Bytes decodiert
-		$dwlen = strlen($dwbytes);
-		$tok = ord($dwbytes[0]);
-		if ($tok >= 132) return "<XDATA '" . $ostr . "'>"; // Embedded Data
-		$odstr = "";	// Ausgabestring - LTX-Konform
-		$idx = 0;
-		while ($dwlen-- > 0) {
-			$tok = ord($dwbytes[$idx++]);
-			if ($tok == 111) { // Deltatime am Anf un dnur merken
-				if ($dwlen < 2) break;
-				$deltatime = get_u16(substr($dwbytes, $idx, 2));
-				$idx += 2;
-				$dwlen -= 2;
-				continue;
-			}
-			if (!strlen($odstr)) $odstr = "+$deltatime";
-			if ($tok <= 89) { // 0-89 F32 Kanaele
-				if ($dwlen < 4) break;
-				$vals = get_ef32(substr($dwbytes, $idx, 4));
-				$idx += 4;
-				$dwlen -= 4;
-				$odstr .= " $tok:$vals";
-			} else break;
-		}
-		if ($dwlen > 0) return false; // Something left?
-		// echo "('$ostr' => '$odstr')\n"; // Dbg
-		return '!' . $odstr;
-	}
-
-	// ----------------MAIN----------------
-	$dbg = 0;	// Debug-Level if >0, see docu
-
-	header('Content-Type: text/plain');
+	$deltatime = 0;
+	$dbg = 0;
 	$trigger_fb = "";
-
-	$api_key = @$_GET['k'];				// max. 41 Chars KEY
-	$mac = strtoupper(@$_GET['s']); 		// exactly 16 UC Chars. api_key and mac identify device
-	$reason = intval(@$_GET['r']);				// Opt. Reason (ALARMS) (as in device_info.dat also)
-	$vpnf = @$_GET['v']; 				// If set direct formward
-	// reason&256: SEND Contact 512|1024:Timeout (reason&16: oder $fcnt>0: Data neu)
-	$now = time();						// one timestamp for complete run
-	$mttr_t0 = microtime(true);           // Benchmark trigger
-	$xlog = "(trigger:$reason)";		// Assume only Trigger/Service
+	$mac = strtoupper($p_mac);
+	$reason = intval($p_reason);
+	$vpnf = $p_vpnf;
+	$now = time();
+	$mttr_t0 = microtime(true);
+	$xlog = "(trigger:$reason)";
 
 	if (!isset($mac) || strlen($mac) != 16) {
 		exit_error("MAC Len");
@@ -181,11 +181,7 @@ try {
 
 	if (@file_exists(S_DATA . "/$mac/cmd/dbg.cmd")) $dbg = 1; // Allow Individual Debug
 
-	// Check Key before loading data
-	//echo "API-KEY: '$api_key'\n"; // TEST
-	if (!$dbg && (!isset($api_key) || strcmp($api_key, S_API_KEY))) {
-		exit_error("API Key");
-	}
+	try {
 
 	// --- Now check files ---
 	$dpath = S_DATA . "/$mac/in_new";		// Device Path (must exist)
@@ -206,7 +202,7 @@ try {
 	db_init();
 
 	// --- Save incomming data in database devices ---
-	if ($pdo->query("SHOW TABLES LIKE 'm$mac'")->rowCount() === 0) { // No Table for this Device 
+	if ($pdo->query("SHOW TABLES LIKE 'm$mac'")->rowCount() === 0) { // No Table for this Device
 		$statement = $pdo->prepare("SELECT vals FROM devices WHERE mac='$mac'");
 		$statement->execute(); // Fail->Exeption
 		$qres = $statement->fetch();
@@ -272,7 +268,7 @@ try {
 	$min_written_id = null;
 	$max_written_id = null;
 	$sqlps = $pdo->prepare("INSERT INTO m$mac ( calc_ts, dataline  ) VALUES ( FROM_UNIXTIME( ? ), ? )");
-	// Regard only EDT-Files! 
+	// Regard only EDT-Files!
 	foreach ($flist as $fname) {
 		if (!strcmp($fname, '.') || !strcmp($fname, '..')) continue;
 		if (!is_file("$dpath/$fname")) {
@@ -284,7 +280,7 @@ try {
 			$ign_cnt++;
 			$xlog .= "('$fname' ignored)";
 
-			// echo "ignore '$fname'";		
+			// echo "ignore '$fname'";
 			if ($dbg < 2) @unlink("$dpath/$fname");
 			continue;	// ONLY Files
 		}
@@ -302,7 +298,7 @@ try {
 		}
 
 		$unixt = 0; // Start with unix-Time unknown
-		foreach ($lines as $line) { // Find 1.st time 
+		foreach ($lines as $line) { // Find 1.st time
 			if ($line[0] != '!') continue;
 			$ht = intval(substr($line, 1));
 			if ($ht > 1526030617 && $ht < 0xF0000000) {
@@ -311,7 +307,7 @@ try {
 			}
 		}
 
-		// ALt: foreach ($lines as $line) { 
+		// ALt: foreach ($lines as $line) {
 		$anzdata = count($lines); // Now with uncompress
 		for ($cnt = 0; $cnt < $anzdata; $cnt++) {
 			$line = $lines[$cnt];
@@ -357,7 +353,7 @@ try {
 						$key = $ds[0];
 						$val = @$ds[1];
 						if (!isset($val)) {
-							$err_new++;	// ERROR: No Value for Channel  
+							$err_new++;	// ERROR: No Value for Channel
 							if (count($info_wea) < 20) $info_wea[] = "ERROR($uxtstr): Channel #$key: No Value";
 						}
 						if (isset($lina[$key])) {	// Can not set twice per line!
@@ -486,7 +482,7 @@ try {
 		$alarm_old = $deva['alarms_cnt'];
 		$err_old = $deva['err_cnt'];
 
-		// Check Battery/Humidity 
+		// Check Battery/Humidity
 		$flags = $deva['flags'];
 		if ($flags & 7) {	// Battery Voltage or Capacity
 			if (($flags & 7) == 1) $lim = 25;
@@ -659,7 +655,7 @@ try {
 					if (HTTPS_SERVER != null) $sec = "https://" . HTTPS_SERVER;
 					else $sec = "http://" . $_SERVER['HTTP_HOST'];
 					$url = $sec . $sroot;
-					$xcont = $_GET['xc']; // Add. Content
+					$xcont = @$_GET['xc']; // Add. Content
 					if (isset($xcont)) {
 						$cont = "\n$xcont\n";
 						$mail_info = "Mail to '$mail_dest','$xcont'";
@@ -725,7 +721,7 @@ try {
 		warnings_cnt =  $warn_tot,
 		alarms_cnt = $alarm_tot,
 		err_cnt = $err_tot,
-		anz_lines = $gesanz 
+		anz_lines = $gesanz
 		WHERE mac ='$mac'";
 
 	$qres = $pdo->exec($insert_sql); // return 0 for no match
@@ -834,11 +830,33 @@ try {
 
 	$mtrun = round((microtime(true) - $mttr_t0) * 1000, 4);
 	$xlog .= "(Run:$mtrun msec)"; // Script Runtime
-} catch (Exception $e) {
-	$xlog .= "(Exception: '" . $e->getMessage() . "')";
+
+	} catch (Exception $e) {
+		$xlog .= "(Exception: '" . $e->getMessage() . "')";
+	}
+
+	add_logfile();
 }
 
-echo "*TRIGGER(DBG:$dbg) RES: ('$xlog')*\n"; // Always
-echo $trigger_fb; // Send Feedback
+// ---- HTTP Entry Point (only when called as standalone script) ----
+if (!defined('LXU_TRIGGER_INLINE')) {
+	header('Content-Type: text/plain');
 
-add_logfile();
+	$api_key = @$_GET['k'];
+	$mac = strtoupper(@$_GET['s']);
+	$xlog = "(trigger)";
+	$dbg = 0;
+
+	if (!isset($mac) || strlen($mac) != 16) {
+		exit_error("MAC Len");
+	}
+	if (@file_exists(S_DATA . "/$mac/cmd/dbg.cmd")) $dbg = 1;
+	if (!$dbg && (!isset($api_key) || strcmp($api_key, S_API_KEY))) {
+		exit_error("API Key");
+	}
+
+	run_trigger(@$_GET['s'], @$_GET['r'], @$_GET['v']);
+
+	echo "*TRIGGER(DBG:$dbg) RES: ('$xlog')*\n";
+	echo $trigger_fb;
+}

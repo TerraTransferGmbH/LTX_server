@@ -90,9 +90,10 @@ $mtmain_t0 = microtime(true);         // for Benchmark
 $dfn = gmdate("Ymd_His", $now);		// 'disk_filename_from_now' (sortable)
 
 $send_cmd = -1;						// If set (0-255) send as Flags-cmd
-if (!isset($mac) || strlen($mac) != 16) {
-	exit_error("MAC Len");
+if (!isset($mac) || !preg_match('/^[0-9A-Fa-f]{16}$/', $mac)) {
+	exit_error("MAC Format");
 }
+$mac = strtoupper($mac);
 
 $dpath = S_DATA . "/$mac";				// Device Path global
 $xlog = "(lxu_v1)";
@@ -263,7 +264,7 @@ for (;;) {
 			$fcrc = r4u_data($bp0 + 5);
 			$fdate = r4u_data($bp0 + 9);
 			$fnlen = ord($data[$bp0 + 13]);
-			$fname = substr($data, $bp0 + 14, $fnlen); // fname on Device
+			$fname = basename(substr($data, $bp0 + 14, $fnlen)); // fname on Device, basename() prevents path traversal
 			if (!strcasecmp(substr($fname, strrpos($fname, '.')), ".php")) $fname .= '_';
 
 			if ($dbg) fwrite($of, "A3: FILE:$fname, Len:$flen, Date:$fdate, F:$fflags CRC:" . dechex($fcrc) . "\n");
@@ -340,9 +341,9 @@ for (;;) {
 			$fdate = r4u_data($bp0 + 4);
 			$fflags = ord($data[$bp0 + 8]);
 			$fnlen = ord($data[$bp0 + 9]);
-			$fname = substr($data, $bp0 + 10, $fnlen);	// extract name
+			$fname = basename(substr($data, $bp0 + 10, $fnlen));	// extract name, basename() prevents path traversal
 
-			if (!strcasecmp(substr($fname, strrpos($fname, '.')), ".php")) $fname .= '_'; // 
+			if (!strcasecmp(substr($fname, strrpos($fname, '.')), ".php")) $fname .= '_'; //
 
 			$flen = $len - $fnlen - 10; // Only len of this block!
 

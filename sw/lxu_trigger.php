@@ -762,6 +762,9 @@ try {
 		fclose($log);
 	}
 
+	// Close DB before external push (free resources while waiting for remote server)
+	$pdo = null;
+
 	// 4a. 'v' pushes ALWAYS to vpnf/ipush.php
 	if (isset($vpnf)) { // Testfile schreiben
 		if (isset($quota[2]) && strlen($quota[2])) {
@@ -777,7 +780,17 @@ try {
 		}
 	}
 
-	// 4b.th Part PUSH (opt.) Reduce CURL TIMEOUT  to 10 sec
+	// 4b.th Part PUSH (opt.) Retry previous failed pushes first, then current
+	$push_retry_file = S_DATA . "/$mac/push_retry.dat";
+	$push_urls = array();
+
+	// Load failed push from last run (retry)
+	if (file_exists($push_retry_file)) {
+		$retry_url = trim(file_get_contents($push_retry_file));
+		if (strlen($retry_url)) $push_urls[] = array($retry_url, true);
+		unlink($push_retry_file);
+	}
+
 	if (isset($quota[2]) && strlen($quota[2])) {
 		$qpar = explode(' ', trim(preg_replace('/\s+/', ' ', $quota[2])));
 		if (count($qpar) && $qpar[0] != '*') { // No Push for '*'
@@ -789,21 +802,34 @@ try {
 			} else {
 				$qpush .= "&minid=$prev_max_id&maxid=$prev_max_id";
 			}
-			$ch = curl_init($qpush);
-			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-			curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
-			curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-			$cres = curl_exec($ch);	// Might be long! 
-			$cinfo = curl_getinfo($ch);
-			if (isset($cinfo['http_code'])) {
-				if (intval($cinfo['http_code'] == 200)) $cstat = "OK";
-				else $cstat = $cinfo['http_code']; // z.B 404
-			}
-			if ($dbg) $xlog .= "(Curl '$qpush' Result:\nSTART=====>\n$cres\n<=====END)";
-			if (curl_errno($ch)) $xlog .= "(ERROR: Push:'$qpush':(" . curl_errno($ch) . "):'" . curl_error($ch) . "')";
-			else $xlog .=  "(Push:'" . $qpar[0] . "':" . @$cstat . ")";
-			curl_close($ch);
+			$push_urls[] = array($qpush, false);
 		}
+	}
+
+	foreach ($push_urls as $pentry) {
+		$purl = $pentry[0];
+		$is_retry = $pentry[1];
+		$cstat = '?';
+		$ch = curl_init($purl);
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+		curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+		curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
+		curl_setopt($ch, CURLOPT_TIMEOUT, 2);
+		$cres = curl_exec($ch);
+		$cinfo = curl_getinfo($ch);
+		if (isset($cinfo['http_code'])) {
+			if (intval($cinfo['http_code']) == 200) $cstat = "OK";
+			else $cstat = $cinfo['http_code'];
+		}
+		$plabel = $is_retry ? "Retry" : "Push";
+		if ($dbg) $xlog .= "(Curl '$purl' Result:\nSTART=====>\n$cres\n<=====END)";
+		if (curl_errno($ch)) {
+			$xlog .= "(ERROR: $plabel:'$purl':(" . curl_errno($ch) . "):'" . curl_error($ch) . "')";
+
+			// Save failed push for retry on next trigger run (only current, not re-retry)
+			if (!$is_retry) file_put_contents($push_retry_file, $purl);
+		} else $xlog .= "($plabel:'" . parse_url($purl, PHP_URL_HOST) . "':$cstat)";
+		curl_close($ch);
 	}
 
 	$mtrun = round((microtime(true) - $mttr_t0) * 1000, 4);

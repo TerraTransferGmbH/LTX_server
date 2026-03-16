@@ -49,6 +49,7 @@ http://localhost/ltx/sw/w_php/w_pcp.php?s=26FEA299F444F836&k=ABC&cmd=iparamunpen
  * iparamchange:	Parameter aendern und speichern
  * getdata:	mMAC ausgeben mit opt. minid und/oder maxid
  * getfile:	Datei(en) aus files/ lesen (file=data.edt, bak=1 fuer .bak dazu, limit=N)
+ * deviceinfo:	device_info.dat als JSON (fw, signal, dBm..)
  * 
  * Status-Returns:
  * 0:	OK
@@ -58,6 +59,7 @@ http://localhost/ltx/sw/w_php/w_pcp.php?s=26FEA299F444F836&k=ABC&cmd=iparamunpen
  * 103: Mehr als 90 Messkanaele nicht moeglich
  * 104,105: Index Error bei 'iparam'
  * 106: Keine geaenderten Parameter gefunden
+ * 108: Ungueltiger 'iparam' Payload
  * ...
  * 300-699: Wie BlueBlx.cs (siehe checkiparam())
  * ...
@@ -192,17 +194,19 @@ try {
 		return false;
 	}
 
+	function isValidMac($mac)
+	{
+		return preg_match('/^[A-F0-9]{16}$/', $mac) === 1;
+	}
+
 	function getcurrentiparam()
 	{
-		global $fpath, $mac, $retResult, $status;
+		global $fpath, $mac, $retResult;
 		$par = @file("$fpath/$mac/put/iparam.lxp", FILE_IGNORE_NEW_LINES); // pending Parameters?
 		if ($par != false) {
 			$retResult['par_pending'] = true;	// Return - Pending Parameters!
 		} else {
 			$par = @file("$fpath/$mac/files/iparam.lxp", FILE_IGNORE_NEW_LINES); // No NL, but empty Lines OK
-			if ($par == false) {
-				$status = "101 No Parameters found for MAC:$mac";
-			}
 			$retResult['par_pending'] = false;	// On Dev.
 		}
 		return $par;
@@ -295,108 +299,158 @@ try {
 
 	if ($dbg > 1) print_r($_REQUEST); // Was wollte man DBG (2)
 
-	$cmd = @$_REQUEST['cmd'];
-	if (!isset($cmd)) $cmd = "";
+	$cmd_str = @$_REQUEST['cmd'];
+	if (!isset($cmd_str)) $cmd_str = "";
+	$cmds = array_map('trim', explode(',', $cmd_str));
+	$cmd_statuses = array();
+	$has_cmd_success = false;
+	$has_cmd_error = false;
+	$first_error_status = null;
 	$ckey = @$_REQUEST['k'];	// s always MAC (k: API-Key, r: Reason)
-	if($ckey == S_API_KEY) $xlog = "(cmd:'$cmd')"; // internal
-	else $xlog = "(cmd:'$cmd', k:'$ckey')";
-	
+	if($ckey == S_API_KEY) $xlog = "(cmd:'$cmd_str')"; // internal
+	else $xlog = "(cmd:'$cmd_str', k:'$ckey')";
 
 	// --- cmd PreStart - CMD vorfiltern ---
-	switch ($cmd) {
-		case "":
-			$retResult['version'] = VERSION;
-			break;
-
-		case "list": // CMD'list' ALLE Devices zu DIESEM PW listen, MAC nicht noetig, Push-URL egal
-			db_init(); // Access Ok, erst dann DB oeffnen (init global $pdo)
-
-			$statement = $pdo->prepare("SELECT * FROM devices");
-			$qres = $statement->execute();
-			if ($qres == false) throw new Exception("DB 'devices'");
-			$anz = $statement->rowCount();
-			$macarr = array();
-			for ($i = 0; $i < $anz; $i++) {
-				$ldev = $statement->fetch();
-				$lmac = $ldev['mac'];
-				if (checkAccess($lmac, $ckey)) {
-					$macarr[] = $lmac;
-				}
+	// Check if version or list requested
+	if (in_array('', $cmds) && count($cmds) == 1) {
+		$retResult['version'] = VERSION;
+	}
+	if (in_array('list', $cmds)) {
+		db_init();
+		$statement = $pdo->prepare("SELECT mac FROM devices");
+		$qres = $statement->execute();
+		if ($qres == false) throw new Exception("DB 'devices'");
+		$macarr = array();
+		while ($ldev = $statement->fetch()) {
+			$lmac = $ldev['mac'];
+			if (checkAccess($lmac, $ckey)) {
+				$macarr[] = $lmac;
 			}
-			if (!count($macarr)) throw new Exception("No Access");
-			$retResult['list_count'] = count($macarr); // Allowed Devices
-			$retResult['list_mac'] = $macarr;
-			break;
+		}
+		if (!count($macarr)) throw new Exception("No Access");
+		$retResult['list_count'] = count($macarr);
+		$retResult['list_mac'] = $macarr;
+	}
 
-		default: // Alle anderen CMDs sind Geratespezifsich
-			// Im Normalfall erstmal feststellen ob Zugriff auf einzelnen Logger erlaubt
-			$mac = @$_REQUEST['s'];	// s ist immer die MAC, muss bekannt sein
-			if (!isset($mac)) $mac = "";
-			if (strlen($mac) != 16) {
-				throw new Exception("MAC len");
-			}
-			$mac = strtoupper($mac);
-			if (!checkAccess($mac, $ckey)) {
-				throw new Exception("No Access");
-			}
-			db_init(); // Access Ok, erst dann DB oeffnen (init global $pdo)
+	// Check if any device-specific command present
+	$needs_device = false;
+	$needs_db = false;
+	$has_data_table = true;
+	foreach ($cmds as $c) {
+		if ($c !== '' && $c !== 'list') $needs_device = true;
+		if (in_array($c, array('details', 'getdata', 'iparamchange', 'iparamunpend'))) $needs_db = true;
+	}
 
-			// Default-Infos fuer diese Teil
-			$statement = $pdo->prepare("SELECT * FROM devices WHERE mac = ?");
+	if ($needs_device) {
+		$mac = @$_REQUEST['s'];
+		if (!isset($mac)) $mac = "";
+		$mac = strtoupper($mac);
+		if (!isValidMac($mac)) {
+			throw new Exception("MAC format");
+		}
+		if (!checkAccess($mac, $ckey)) {
+			throw new Exception("No Access");
+		}
+
+		// DB and overview only if needed
+		if ($needs_db) {
+			db_init();
+			if (in_array('details', $cmds)) {
+				$deviceSelect = "SELECT * FROM devices WHERE mac = ?";
+			} else {
+				$deviceSelect = "SELECT mac, last_change, last_seen, name, units, vals, cookie, transfer_cnt, lines_cnt, warnings_cnt, alarms_cnt, err_cnt, anz_lines FROM devices WHERE mac = ?";
+			}
+			$statement = $pdo->prepare($deviceSelect);
 			$qres = $statement->execute(array($mac));
 			if ($qres == false) throw new Exception("MAC $mac not in 'devices'");
-			$devres = $statement->fetch(); // $devres[]: 'device(mac)'!
+			$devres = $statement->fetch();
 
-			$ovv = array();	// Overview zu dieser MAC
-			$ovv['mac']=$mac;   
-			$ovv['db_now'] = $pdo->query("SELECT NOW() as now")->fetch()['now']; // *JETZT* als Datum UTC - Rein zurInfo
+			$ovv = array();
+			$ovv['mac'] = $mac;
+			$ovv['db_now'] = gmdate("Y-m-d H:i:s");
 
-			if ($pdo->query("SHOW TABLES LIKE 'm$mac'")->rowCount() === 0){
-				$maxid = $minid = -1; // No Data
-				$status = "100 No Data for MAC"; // Error 100
-			}else{
-				$statement = $pdo->prepare("SELECT MIN(id) as minid, MAX(id) as maxid FROM m$mac");
-				$qres = $statement->execute();
-				if ($qres == false) throw new Exception("No table'm$mac'");
+			$statement = @$pdo->prepare("SELECT MIN(id) as minid, MAX(id) as maxid FROM m$mac");
+			if ($statement === false || $statement->execute() === false) {
+				$has_data_table = false;
+				$maxid = $minid = -1;
+			} else {
 				$mm = $statement->fetch();
 				$maxid = $mm['maxid'];
 				$minid = $mm['minid'];
 			}
-			$ovv['min_id'] = $minid;	// Minimale ID in mMAC (kann variiern, da CRON Autodrop alter Werte)
-			$ovv['max_id'] = $maxid;	// Maximaler ID in mMAC (Differenz+1 normalerweise (ungefaehr!) = 'anz_lines')
-			if ($cmd != 'details') {	// WIchtige Overview-Daten, aber doppelt nicht noetig
-				$ovv['last_change'] = $devres['last_change'];	// Wann zuletzt Daten/irgendwas geandert
-				$ovv['last_seen'] = $devres['last_seen'];	// Wann zuletzt Daten angekommen
-				$ovv['name'] = $devres['name'];	// Name des Geraetes (wie in iparam.lxp)
-				$ovv['units'] = $devres['units']; // Die aktuellen verwendeten Kanaele/Einheiten 
-				$ovv['vals'] = $devres['vals'];	// Die letzten Werte aller verwendeten Kanaele
-				$ovv['cookie'] = $devres['cookie'];	// Cookie der Parameter 'iparam.lxp' (wie aktuell auf Geraet)
-				$ovv['transfer_cnt'] = $devres['transfer_cnt'];	// Anzahl der Transfers
-				$ovv['lines_cnt'] = $devres['lines_cnt'];	// Insgesmt uebertragene Zeilen Daten
-				$ovv['warnings_cnt'] = $devres['warnings_cnt']; // Aktuell vorh. Warnungen (z.B Innen-Feuchte)
-				$ovv['alarms_cnt'] = $devres['alarms_cnt'];	// Aktuell vor. Alarme (Grenzwert)
-				$ovv['err_cnt'] = $devres['err_cnt'];	// Aktuell vorh. Fehler (z.B. Netzfehler)
-				$ovv['anz_lines'] = $devres['anz_lines'];	// Aktuell vorh. Zeilen
+			$ovv['min_id'] = $minid;
+			$ovv['max_id'] = $maxid;
+			if (!in_array('details', $cmds)) {
+				$ovv['last_change'] = $devres['last_change'];
+				$ovv['last_seen'] = $devres['last_seen'];
+				$ovv['name'] = $devres['name'];
+				$ovv['units'] = $devres['units'];
+				$ovv['vals'] = $devres['vals'];
+				$ovv['cookie'] = $devres['cookie'];
+				$ovv['transfer_cnt'] = $devres['transfer_cnt'];
+				$ovv['lines_cnt'] = $devres['lines_cnt'];
+				$ovv['warnings_cnt'] = $devres['warnings_cnt'];
+				$ovv['alarms_cnt'] = $devres['alarms_cnt'];
+				$ovv['err_cnt'] = $devres['err_cnt'];
+				$ovv['anz_lines'] = $devres['anz_lines'];
 			}
 			$retResult['overview'] = $ovv;
-	} // --- cmd PreEnde ---
+		}
+	}
 
-	// --- cmd Main Start - CMD auswerten ---
+	// --- cmd Main Start - CMD auswerten (loop for multi-cmd support) ---
+	foreach ($cmds as $cmd) {
+	$cmd_status = null;
 	switch ($cmd) {
 		case '': // VERSION
 		case 'list': // Liste schon fertig
-			break;	
+			break;
 
 		case 'details':	// Einfach ALLES fuer diese MAC
 			$retResult['details'] = $devres;
 			break;
 
+		case 'deviceinfo': // Device Info file (fw, dBm..)
+			$di_file = "$fpath/$mac/device_info.dat";
+			if (!file_exists($di_file)) {
+				$retResult['deviceinfo'] = "No device information file found";
+				break;
+			}
+			$lines = file($di_file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+			$data = array();
+			foreach ($lines as $line) {
+				$parts = explode("\t", $line, 2);
+				if (count($parts) !== 2) continue;
+				$key = $parts[0];
+				$value = $parts[1];
+				if ($key === 'signal' && strlen($value)) {
+					$signalArray = array();
+					$subParts = explode(" ", $value);
+					foreach ($subParts as $subPart) {
+						if (strpos($subPart, ':') !== false) {
+							list($subKey, $subValue) = explode(':', $subPart, 2);
+							if (is_numeric($subValue)) $subValue = intval($subValue);
+							$signalArray[$subKey] = $subValue;
+						}
+					}
+					$data[$key] = $signalArray;
+				} else {
+					if (is_numeric($value)) $value = intval($value);
+					$data[$key] = $value;
+				}
+			}
+			$retResult['deviceinfo'] = $data;
+			break;
+
 		case 'iparam': // Parameterfile fuer diese MAC
 			$par = getcurrentiparam();
-			if ($par == false) break;
+			if ($par == false) {
+				$cmd_status = "101 No Parameters found for MAC:$mac";
+				break;
+			}
 			$chkres = checkiparam($par);
 			if($chkres != null) { 
-				$status = $chkres;
+				$cmd_status = $chkres;
 				break;
 			}
 			$vkarr = [];	// Ausgabe der Parameter etwas verzieren fuer leichtere Lesbarkeit
@@ -431,17 +485,24 @@ try {
 
 		case 'iparamchange': // Parameter changes sorgfaeltig einpflegen. Probleme melden
 			$opar = $par = getcurrentiparam();
-			if ($par == false) break;
+			if ($par == false) {
+				$cmd_status = "101 No Parameters found for MAC:$mac";
+				break;
+			}
 			$chkres = checkiparam($par);
 			if($chkres != null) { 
-				$status = $chkres;
+				$cmd_status = $chkres;
 				break;
 			}
 			$nparlist = $_REQUEST['iparam'];
+			if (!isset($nparlist) || !is_array($nparlist)) {
+				$cmd_status = "108 Invalid iparam payload";
+				break;
+			}
 			foreach ($nparlist as $npk => $npv) {
 				$idx = intval($npk);
 				if ($idx < 5 || $idx > 1999) { // 0..3: Header
-					$status = "104 Index Error";
+					$cmd_status = "104 Index Error";
 					break;
 				}
 
@@ -454,16 +515,16 @@ try {
 					$parLastChanIdx+=$parChanSize;
 				}
 				if($parLastChanNo>89){
-					$status = "103 Too many Channels"; // max. 90 Kanaele
+					$cmd_status = "103 Too many Channels"; // max. 90 Kanaele
 					break;
 				}
 				if ($idx >= $parLastChanIdx && ($idx - $parLastChanIdx) % $parChanSize == 0) {
-					$status = "105 Index Error (Index/Line $idx)"; // Kanalnr. nicht aenderbar '@xx'
+					$cmd_status = "105 Index Error (Index/Line $idx)"; // Kanalnr. nicht aenderbar '@xx'
 					break;
 				}
 
 			}
-			if (isset($status)) break;
+			if (isset($cmd_status)) break;
 			// Nun alles OK, Alte Werte durch neue ersetzen
 			foreach ($nparlist as $npk => $npv) {
 				$idx = intval($npk);
@@ -479,7 +540,7 @@ try {
 
 			$chkres = checkiparam($par); // Nochmal pruefen
 			if($chkres != null) { 
-				$status = $chkres;
+				$cmd_status = $chkres;
 				break;
 			}
 			
@@ -488,11 +549,11 @@ try {
 				for($i=0;$i<count($opar);$i++){
 					if($opar[$i]!=$par[$i]) break;
 				}
-				if($i==count($opar)){
-					$status = "106 No Changes found"; // Keine Aederungen
-					break;
+					if($i==count($opar)){
+						$cmd_status = "106 No Changes found"; // Keine Aederungen
+						break;
+					}
 				}
-			}
 
 			// Aus Array File erzeugen
 			$par[4]=time();	// Neuen Cookie dafuer
@@ -510,18 +571,21 @@ try {
 					$retResult['overview']['name']=@$par[5];
 				}
 				$xlog .= "(New Hardware-Parameter 'iparam.lxp':$ilen)";
-				$retResult['par_pending'] = true;
-			} else {
-				$xlog .= "(ERROR: Write 'iparam.lxp':$slen/$ilen Bytes)";
-				$status = "107 Write Parameter";
-			}
-			break;
+					$retResult['par_pending'] = true;
+				} else {
+					$xlog .= "(ERROR: Write 'iparam.lxp':$slen/$ilen Bytes)";
+					$cmd_status = "107 Write Parameter";
+				}
+				break;
 
 		case 'iparamunpend':
 			@unlink("$fpath/$mac/cmd/iparam.lxp.pmeta");
 			@unlink("$fpath/$mac/put/iparam.lxp");
 			$par = getcurrentiparam();
-			if ($par == false) break;
+			if ($par == false) {
+				$cmd_status = "101 No Parameters found for MAC:$mac";
+				break;
+			}
 			$snn = $pdo->prepare("UPDATE devices SET name = ? WHERE mac = ?");
 			$snn->execute(array(@$par[5], $mac));
 			$retResult['overview']['name']=@$par[5];
@@ -529,27 +593,27 @@ try {
 			break;
 
 		case 'getdata':
-			if (isset($status)) break;
+			if (!$has_data_table) {
+				$cmd_status = "100 No Data for MAC";
+				break;
+			}
 
-			// $minid und $maxid noch von oben, evtl. ueberschreiben
-			$xlog .= "([";
+			// Default ist der in der Overview ermittelte Bereich, Request-Werte koennen ihn ueberschreiben.
+			$req_minid = $minid;
+			$req_maxid = $maxid;
 			if (isset($_REQUEST['minid'])) {
-				$minid = intval($_REQUEST['minid']);
-				$xlog .= $minid;
+				$req_minid = intval($_REQUEST['minid']);
 			}
-			$xlog .= "..";
 			if (isset($_REQUEST['maxid'])) {
-				$maxid = intval($_REQUEST['maxid']);
-				$xlog .= $maxid;
+				$req_maxid = intval($_REQUEST['maxid']);
 			}
+			$xlog .= "([" . $req_minid . ".." . $req_maxid . "]";
 
 			$statement = $pdo->prepare("SELECT * FROM m$mac WHERE   ( id >= ? AND id <= ? )");
-			$qres = $statement->execute(array($minid, $maxid));
+			$qres = $statement->execute(array($req_minid, $req_maxid));
 			if ($qres == false) throw new Exception("getdata");
-			$anz = $statement->rowCount(); // No of matches
 			$valarr = array();
-			for ($i = 0; $i < $anz; $i++) {
-				$user_row = $statement->fetch();
+			while ($user_row = $statement->fetch()) {
 				$line_ts = $user_row['line_ts'];	// Wann eingepflegt in DB (UTC)
 				$calc_ts = $user_row['calc_ts'];	// RTC des Gerates (UTC)
 				$id = $user_row['id']; 				// Zeilen ID. *** Achtung: Nach ClearDevice beginnt die wieder bei 1 ***
@@ -576,15 +640,15 @@ try {
 
 			break;
 
-		case 'getfile':
-			// Read EDT file(s) from files/ directory
-			$fname = @$_REQUEST['file'];
-			if (!strlen($fname)) $fname = "data.edt";
-			// Security: only allow specific filenames
-			if (!in_array($fname, ['data.edt', 'data.edt.bak', 'iparam.lxp', 'sys_param.lxp'])) {
-				$status = "110 Invalid filename";
-				break;
-			}
+			case 'getfile':
+				// Read EDT file(s) from files/ directory
+				$fname = @$_REQUEST['file'];
+				if (!strlen($fname)) $fname = "data.edt";
+				// Security: only allow specific filenames
+				if (!in_array($fname, ['data.edt', 'data.edt.bak', 'iparam.lxp', 'sys_param.lxp'])) {
+					$cmd_status = "110 Invalid filename";
+					break;
+				}
 			$bak = isset($_REQUEST['bak']) && $_REQUEST['bak'];  // Include .bak file
 			$limit = isset($_REQUEST['limit']) ? intval($_REQUEST['limit']) : 0;
 
@@ -613,10 +677,10 @@ try {
 				}
 			}
 
-			if (empty($files_read)) {
-				$status = "111 File(s) not found";
-				break;
-			}
+				if (empty($files_read)) {
+					$cmd_status = "111 File(s) not found";
+					break;
+				}
 
 			// Apply limit (from end, newest data)
 			$total_lines = count($alllines);
@@ -677,12 +741,24 @@ try {
 			break;
 
 		default:
-			$status = "102 Unknown Cmd";
+			$cmd_status = "102 Unknown Cmd '$cmd'";
 	} // --- cmd Main Ende ---
+	$cmd_status_key = ($cmd === '') ? 'version' : $cmd;
+	if ($cmd_status == null) {
+		$cmd_statuses[] = array('cmd' => $cmd_status_key, 'status' => "0 OK");
+		$has_cmd_success = true;
+	} else {
+		$cmd_statuses[] = array('cmd' => $cmd_status_key, 'status' => $cmd_status);
+		$has_cmd_error = true;
+		if ($first_error_status == null) $first_error_status = $cmd_status;
+	}
+	} // --- foreach cmds ---
 
 	// Benchmark am Ende
 	$mtrun = round((microtime(true) - $mtmain_t0) * 1000, 4);
-	if (!isset($status)) $status = "0 OK";	// Im Normalfall Status '0 OK'
+	if (count($cmds) > 1) $retResult['cmd_status'] = $cmd_statuses;
+	if ($has_cmd_error && !$has_cmd_success) $status = $first_error_status;
+	else $status = "0 OK";	// Im Normalfall Status '0 OK'
 	$retResult['status'] = $status . " ($mtrun msec)";	// plus Time
 
 	$ares = json_encode($retResult); // assoc array always as object
@@ -695,5 +771,5 @@ try {
 	$xlog .= "($errm)";
 }
 
-if (isset($pdo) && strlen($xlog)) add_logfile(); // // Nur ernsthafte Anfragen loggen
+if (strlen($xlog)) add_logfile(); // // Nur ernsthafte Anfragen loggen
 // ***

@@ -66,6 +66,7 @@ http://localhost/ltx/sw/w_php/w_pcp.php?s=26FEA299F444F836&k=ABC&cmd=iparamunpen
  */
 
 define('VERSION', "LTX V1.13 04.03.2026");
+define('VERSION_TT', "TT V0.1 16.03.2026");
 
 error_reporting(E_ALL);
 ini_set("display_errors", true);
@@ -759,6 +760,7 @@ try {
 	if (count($cmds) > 1) $retResult['cmd_status'] = $cmd_statuses;
 	if ($has_cmd_error && !$has_cmd_success) $status = $first_error_status;
 	else $status = "0 OK";	// Im Normalfall Status '0 OK'
+	$retResult['version_tt'] = VERSION_TT;
 	$retResult['status'] = $status . " ($mtrun msec)";	// plus Time
 
 	$ares = json_encode($retResult); // assoc array always as object

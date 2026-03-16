@@ -609,7 +609,7 @@ try {
 			}
 			$xlog .= "([" . $req_minid . ".." . $req_maxid . "]";
 
-			$statement = $pdo->prepare("SELECT * FROM m$mac WHERE   ( id >= ? AND id <= ? )");
+			$statement = $pdo->prepare("SELECT id, line_ts, calc_ts, dataline FROM m$mac WHERE (id >= ? AND id <= ?) ORDER BY id");
 			$qres = $statement->execute(array($req_minid, $req_maxid));
 			if ($qres == false) throw new Exception("getdata");
 			$valarr = array();

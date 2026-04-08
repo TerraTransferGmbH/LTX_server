@@ -39,6 +39,7 @@ http://localhost/ltx/sw/w_php/w_pcp.php?s=26FEA299F444F836&k=ABC&cmd=iparamunpen
  * cmd: Kommando
  * k: AccessKey (aus 'quota_days.dat') (opt.)
  * s: MAC(16-Digits) (opt.)
+ * d: Debug-Level (1,2) - erfordert k=S_API_KEY, aktiviert pcplog-Logging
  * 
  * cmd:
  * '':		Version
@@ -82,7 +83,7 @@ require_once("../conf/config.inc.php");	// DB Access
 require_once("../conf/api_key.inc.php"); // APIs
 require_once("../inc/db_funcs.inc.php"); // Init DB
 
-$dbg = 0; // 1:Dbg, 2:Dbg++
+$dbg = (isset($_REQUEST['d']) && $_REQUEST['k'] === S_API_KEY) ? intval($_REQUEST['d']) : 0;
 $fpath = "../" . S_DATA;	// Globaler Pfad auf Daten
 $xlog = ""; // Log-String
 
@@ -773,5 +774,5 @@ try {
 	$xlog .= "($errm)";
 }
 
-if (strlen($xlog)) add_logfile(); // // Nur ernsthafte Anfragen loggen
+if ($dbg || $has_cmd_error) add_logfile(); // Log only on debug or errors
 // ***

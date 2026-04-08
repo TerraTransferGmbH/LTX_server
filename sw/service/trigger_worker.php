@@ -61,8 +61,12 @@ if (!isset($_SERVER['SERVER_NAME'])) {
 	$_SERVER['SERVER_PORT'] = 80;
 }
 
-include_once(__DIR__ . "/../conf/api_key.inc.php");
-include_once(__DIR__ . "/../conf/config.inc.php");
+chdir(__DIR__ . "/..");
+include_once("conf/api_key.inc.php");
+include_once("conf/config.inc.php");
+include_once("lxu_loglib.php");
+define('LXU_TRIGGER_INLINE', true); // Prevent HTTP entry point in lxu_trigger.php
+include_once("lxu_trigger.php");
 
 // Queue DB connection (separate from trigger's $pdo)
 $qpdo = new PDO("mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8", DB_USER, DB_PASSWORD);
@@ -102,9 +106,6 @@ while (time() - $worker_start < WORKER_MAX_RUNTIME) {
 		$dbg = 0;
 
 		if (@file_exists(S_DATA . "/$mac/cmd/dbg.cmd")) $dbg = 1;
-
-		include_once(__DIR__ . "/../lxu_loglib.php");
-		include_once(__DIR__ . "/../lxu_trigger.php");
 
 		$now = time();
 		run_trigger($row['mac'], $row['reason'], $row['vpnf'] ? '' : null);

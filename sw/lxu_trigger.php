@@ -220,7 +220,8 @@ function run_trigger($p_mac, $p_reason, $p_vpnf = null) {
 			`line_ts` timestamp DEFAULT CURRENT_TIMESTAMP,
 			`calc_ts` timestamp NULL DEFAULT NULL,
 			`dataline` varchar(8191) COLLATE utf8_unicode_ci NOT NULL,
-			PRIMARY KEY (`id`)
+			PRIMARY KEY (`id`),
+			INDEX idx_line_ts (`line_ts`)
 			) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;");
 		if ($qres === false) exit_error("(ERROR 104:" . $pdo->errorInfo()[2] . ")"); // Can not Create Table
 	} else {	// Table exists, Check Entry in decices

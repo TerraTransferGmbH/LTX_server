@@ -765,21 +765,44 @@ try {
 	if (!isset($status)) {
 
 		// Quick Check all user's devices for changes OWN first
-		if ($urole & 65536) {
-			$statement = $pdo->prepare("SELECT *, UNIX_TIMESTAMP(last_change) AS lsc FROM devices"); // Admin
-			$statement->execute();
-		} else {
-			$statement = $pdo->prepare("SELECT *, UNIX_TIMESTAMP(last_change) AS lsc FROM devices WHERE owner_id = ?"); // Normal User
-			$statement->execute(array($user_id));
-		}
-		$anzo = $statement->rowCount(); // No of matches = Number of User's OWN Devices
 		$devices = array();
 
-		for ($i = 0; $i < $anzo; $i++) {
-			$user_row = $statement->fetch();
-			$lsc = $user_row['lsc'];
-			if ($dblast >= $lsc) continue;
-			$dev = array('idx' => $i);
+		if ($dblast) {
+			// Subsequent poll: lightweight id scan for idx mapping, then only changed devices
+			if ($urole & 65536) {
+				$id_stmt = $pdo->query("SELECT id FROM devices ORDER BY id");
+			} else {
+				$id_stmt = $pdo->prepare("SELECT id FROM devices WHERE owner_id = ? ORDER BY id");
+				$id_stmt->execute(array($user_id));
+			}
+			$id_map = array();
+			$idx = 0;
+			while ($id_row = $id_stmt->fetch()) $id_map[$id_row['id']] = $idx++;
+			$anzo = $idx;
+
+			if ($urole & 65536) {
+				$statement = $pdo->prepare("SELECT *, UNIX_TIMESTAMP(last_change) AS lsc FROM devices WHERE last_change > FROM_UNIXTIME(?) ORDER BY id");
+				$statement->execute(array($dblast));
+			} else {
+				$statement = $pdo->prepare("SELECT *, UNIX_TIMESTAMP(last_change) AS lsc FROM devices WHERE owner_id = ? AND last_change > FROM_UNIXTIME(?) ORDER BY id");
+				$statement->execute(array($user_id, $dblast));
+			}
+		} else {
+			// First poll: full query
+			if ($urole & 65536) {
+				$statement = $pdo->prepare("SELECT *, UNIX_TIMESTAMP(last_change) AS lsc FROM devices ORDER BY id");
+				$statement->execute();
+			} else {
+				$statement = $pdo->prepare("SELECT *, UNIX_TIMESTAMP(last_change) AS lsc FROM devices WHERE owner_id = ? ORDER BY id");
+				$statement->execute(array($user_id));
+			}
+			$anzo = $statement->rowCount();
+			$id_map = null;
+		}
+
+		$i = 0;
+		while ($user_row = $statement->fetch()) {
+			$dev = array('idx' => $id_map !== null ? $id_map[$user_row['id']] : $i);
 			$dev['owner_id'] = $user_id; // Fix!
 			$dev['real_owner_id'] = $user_row['owner_id']; // For Admin
 			$dev['role'] = $user_row['ow_role'];
@@ -808,18 +831,30 @@ try {
 			$dev['vbat100'] = $user_row['vbat100'];
 			$dev['cbat'] = $user_row['cbat'];
 			$devices[] = $dev;
+			$i++;
 		}
 
 		// Guest Devices
-		$statement = $pdo->prepare("SELECT *, UNIX_TIMESTAMP(last_change) AS lsc, guest_devices.token FROM devices INNER JOIN guest_devices ON devices.mac = guest_devices.mac WHERE guest_devices.guest_id = ?");
-		$statement->execute(array($user_id));
-		$anzg = $statement->rowCount(); // No of matches = Number of Guest Devices
-		for ($i = 0; $i < $anzg; $i++) {
+		if ($dblast) {
+			$id_stmt = $pdo->prepare("SELECT devices.id FROM devices INNER JOIN guest_devices ON devices.mac = guest_devices.mac WHERE guest_devices.guest_id = ? ORDER BY devices.id");
+			$id_stmt->execute(array($user_id));
+			$guest_id_map = array();
+			$gidx = 0;
+			while ($id_row = $id_stmt->fetch()) $guest_id_map[$id_row['id']] = $gidx++;
+			$anzg = $gidx;
 
-			$user_row = $statement->fetch();
-			$lsc = $user_row['lsc'];
-			if ($dblast >= $lsc) continue;
-			$dev = array('idx' => $i + $anzo);	// + own
+			$statement = $pdo->prepare("SELECT *, UNIX_TIMESTAMP(last_change) AS lsc, guest_devices.token FROM devices INNER JOIN guest_devices ON devices.mac = guest_devices.mac WHERE guest_devices.guest_id = ? AND last_change > FROM_UNIXTIME(?) ORDER BY devices.id");
+			$statement->execute(array($user_id, $dblast));
+		} else {
+			$statement = $pdo->prepare("SELECT *, UNIX_TIMESTAMP(last_change) AS lsc, guest_devices.token FROM devices INNER JOIN guest_devices ON devices.mac = guest_devices.mac WHERE guest_devices.guest_id = ? ORDER BY devices.id");
+			$statement->execute(array($user_id));
+			$anzg = $statement->rowCount();
+			$guest_id_map = null;
+		}
+
+		$i = 0;
+		while ($user_row = $statement->fetch()) {
+			$dev = array('idx' => ($guest_id_map !== null ? $guest_id_map[$user_row['id']] : $i) + $anzo);
 			$token = $user_row['token'];
 			$role = 0;
 			if ($token == $user_row['token0']) {
@@ -852,6 +887,7 @@ try {
 			$dev['cbat'] = $user_row['cbat'];
 
 			$devices[] = $dev;
+			$i++;
 		}
 		$ret['anz_devices'] = $anzo + $anzg;
 

@@ -10,11 +10,22 @@
  * Setup:
  *   1. Create trigger_queue table (included in docu/database.sql,
  *      or run service/trigger_queue.sql on existing databases)
+ *
+ * Option A: systemd (recommended, immediate restart)
  *   2. Install systemd template unit:
  *      cp ltx-trigger@.service /etc/systemd/system/
  *      systemctl daemon-reload
  *   3. Start workers (e.g. 5 instances):
  *      systemctl enable --now ltx-trigger@{1..5}
+ *
+ * Option B: cron (no root/systemd needed, e.g. shared hosting)
+ *   Add to crontab (e.g. 3 workers):
+ *      * * * * * /usr/bin/php /path/to/sw/service/trigger_worker.php cron1
+ *      * * * * * /usr/bin/php /path/to/sw/service/trigger_worker.php cron2
+ *      * * * * * /usr/bin/php /path/to/sw/service/trigger_worker.php cron3
+ *   Workers run max 5 min, cron restarts them every minute.
+ *   SKIP LOCKED prevents double-processing across overlapping workers.
+ *   Note: up to 60s delay until first worker starts after queue was empty.
  *
  * systemd unit template (/etc/systemd/system/ltx-trigger@.service):
  *

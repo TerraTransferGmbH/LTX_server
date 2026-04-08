@@ -100,7 +100,7 @@ CREATE TABLE IF NOT EXISTS `devices` (
 -- x   `em_date3` timestamp NULL DEFAULT NULL,
 -- x   `em_cnt3` int unsigned DEFAULT 0,
 
-  PRIMARY KEY (`id`), UNIQUE (`mac`), INDEX(`mac`), INDEX(`owner_id`)
+  PRIMARY KEY (`id`), UNIQUE (`mac`), INDEX(`owner_id`), INDEX idx_last_change (`last_change`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
 
 -- Async trigger queue (processed by service/trigger_worker.php)

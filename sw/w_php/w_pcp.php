@@ -181,19 +181,40 @@ function add_logfile()
 
 try {
 	// Check Access-Token for this Device
+	// Uses APCu cache if available (php-apcu), falls back to file read.
+	// Cache is invalidated by filemtime change (e.g. after quota edit via w_rad.php or legacy).
 	function checkAccess($lmac, $ckey)
 	{
 		global $fpath;
 		if ($ckey == S_API_KEY) return true;	// S_API_KEY valid for ALL
-		$quota = @file("$fpath/$lmac/quota_days.dat", FILE_IGNORE_NEW_LINES);
-		if (isset($quota[2]) && strlen($quota[2])) {
-			$qpar = explode(' ', trim(preg_replace('/\s+/', ' ', $quota[2])));
-			// Check all keys from position 1 onwards
-			for ($i = 1; $i < count($qpar); $i++) {
-				if ($ckey === $qpar[$i]) return true;
+
+		$keys = null;
+		$qfile = "$fpath/$lmac/quota_days.dat";
+		$cache_key = "quota_keys_$lmac";
+
+		if (function_exists('apcu_fetch')) {
+			$cached = apcu_fetch($cache_key);
+			if ($cached !== false) {
+				$mtime = @filemtime($qfile);
+				if ($mtime === $cached['mtime']) {
+					$keys = $cached['keys'];
+				}
 			}
 		}
-		return false;
+
+		if ($keys === null) {
+			$keys = [];
+			$quota = @file($qfile, FILE_IGNORE_NEW_LINES);
+			if (isset($quota[2]) && strlen($quota[2])) {
+				$qpar = explode(' ', trim(preg_replace('/\s+/', ' ', $quota[2])));
+				for ($i = 1; $i < count($qpar); $i++) $keys[] = $qpar[$i];
+			}
+			if (function_exists('apcu_store')) {
+				apcu_store($cache_key, ['keys' => $keys, 'mtime' => @filemtime($qfile)], 3600);
+			}
+		}
+
+		return in_array($ckey, $keys);
 	}
 
 	function isValidMac($mac)

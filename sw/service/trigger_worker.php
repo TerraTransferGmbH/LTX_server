@@ -4,12 +4,33 @@
  * trigger_worker.php - Async Trigger Worker for LTrax
  *
  * Polls trigger_queue table and runs triggers in sequence.
- * Run as systemd service (multiple instances for parallelism):
- *   systemctl start ltx-trigger@1
- *   systemctl start ltx-trigger@2
- *
  * Uses SELECT ... FOR UPDATE SKIP LOCKED to prevent
  * double-processing across multiple worker instances.
+ *
+ * Setup:
+ *   1. Create trigger_queue table (included in docu/database.sql,
+ *      or run service/trigger_queue.sql on existing databases)
+ *   2. Install systemd template unit:
+ *      cp ltx-trigger@.service /etc/systemd/system/
+ *      systemctl daemon-reload
+ *   3. Start workers (e.g. 5 instances):
+ *      systemctl enable --now ltx-trigger@{1..5}
+ *
+ * systemd unit template (/etc/systemd/system/ltx-trigger@.service):
+ *
+ *   [Unit]
+ *   Description=LTX Trigger Worker %i
+ *   After=mysql.service
+ *
+ *   [Service]
+ *   Type=simple
+ *   ExecStart=/usr/bin/php /path/to/sw/service/trigger_worker.php %i
+ *   Restart=always
+ *   RestartSec=1
+ *   User=www-data
+ *
+ *   [Install]
+ *   WantedBy=multi-user.target
  *
  ***************************************************************/
 

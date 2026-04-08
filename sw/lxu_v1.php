@@ -5,6 +5,7 @@
 
 error_reporting(E_ALL);
 include_once("conf/api_key.inc.php");
+include_once("conf/config.inc.php");
 include_once("lxu_loglib.php");
 
 // ----- reads u32 from $data  BE -----   32Bit.u from String
@@ -41,9 +42,17 @@ function show_str($rem, $str)
 function trigger($reason, $vflag)
 {
 	global $mac;
-	define('LXU_TRIGGER_INLINE', true);
-	include_once("lxu_trigger.php");
-	run_trigger($mac, $reason, $vflag ? '' : null);
+	try {
+		$tpdo = new PDO("mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8", DB_USER, DB_PASSWORD);
+		$tpdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+		$tpdo->prepare("INSERT INTO trigger_queue (mac, reason, vpnf) VALUES (?, ?, ?)")
+			->execute([$mac, intval($reason), $vflag ? 1 : 0]);
+	} catch (Exception $e) {
+		// Queue unavailable — fall back to inline trigger
+		define('LXU_TRIGGER_INLINE', true);
+		include_once("lxu_trigger.php");
+		run_trigger($mac, $reason, $vflag ? '' : null);
+	}
 }
 
 // -------------------------------------- M A I N --------------------------------

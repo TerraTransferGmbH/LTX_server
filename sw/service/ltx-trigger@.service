@@ -1,0 +1,13 @@
+[Unit]
+Description=LTX Trigger Worker %i
+After=mysql.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/php /path/to/sw/service/trigger_worker.php %i
+Restart=always
+RestartSec=1
+User=www-data
+
+[Install]
+WantedBy=multi-user.target

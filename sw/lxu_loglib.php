@@ -78,15 +78,10 @@ function add_logfile()
 	if(!isset($mac)) $mac="UNKNOWN_MAC";
 	if ($dbg) $xlog .= "(DBG:$dbg)";
 
-	$log = @fopen($sdata . "/log/log.txt", 'a');
-	if ($log) {
-		while (!flock($log, LOCK_EX)) usleep(10000);  // Lock File - Is a MUST
-		fputs($log, gmdate("d.m.y H:i:s ", $now) . "UTC " . $_SERVER['REMOTE_ADDR'] );        // Write file
-		if (strlen($mac)) fputs($log, " MAC:$mac"); // mac only for global lock
-		fputs($log, " $xlog\n");        // evt. add extras
-		flock($log, LOCK_UN);
-		fclose($log);
-	}
+	$line = gmdate("d.m.y H:i:s ", $now) . "UTC " . $_SERVER['REMOTE_ADDR'];
+	if (strlen($mac)) $line .= " MAC:$mac";
+	$line .= " $xlog\n";
+	@file_put_contents($sdata . "/log/log.txt", $line, FILE_APPEND | LOCK_EX);
 	// User Logfile - Text
 	if (strlen($mac) == 16 && file_exists($sdata . "/$mac")) {
 		$logpath = $sdata . "/$mac/";
@@ -104,13 +99,7 @@ function add_logfile()
 			}
 		}
 
-		$log = fopen($logpath . "log.txt", 'a');
-		if (!$log) return;
-		while (!flock($log, LOCK_EX)) usleep(10000);  // Lock File - Is a MUST
-		//fputs($log,gmdate("d.m.y H:i:s ",$now)."UTC ".$_SERVER['REMOTE_ADDR']]);
-		fputs($log, gmdate("d.m.y H:i:s ", $now) . "UTC");
-		fputs($log, " $xlog\n");        // evt. add extras
-		flock($log, LOCK_UN);
-		fclose($log);
+		$line = gmdate("d.m.y H:i:s ", $now) . "UTC $xlog\n";
+		@file_put_contents($logpath . "log.txt", $line, FILE_APPEND | LOCK_EX);
 	}
 }

@@ -95,6 +95,10 @@ try {
 			echo "======================<br>";
 			echo "LTX Database Setup OK!<br>";
 			echo "======================<br>";
+			echo "<br><b>Optional: Async Trigger Worker</b><br>";
+			echo "For better performance with many devices, start the trigger worker:<br>";
+			echo "<code>php sw/service/trigger_worker.php 1</code><br>";
+			echo "See <code>sw/service/trigger_worker.php</code> for systemd/cron setup.<br>";
 		}
 	} else {
 		$xlog .= "(ERROR: Failed to Create Initial Tables)";

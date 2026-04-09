@@ -611,8 +611,7 @@ function user_poll(jcmd) {
 			if (data.anz_devices != userAnzDevices) { // Check Number of Devices
 				userAnzDevices = data.anz_devices;
 				if (anzW != userAnzDevices) {
-					ownAlert(ll('errorcap') + ":", ll('errordevnumber'));
-					lastSeenTimestamp = 0;
+					lastSeenTimestamp = 0; // Force full reload on next poll
 					return;
 				}
 

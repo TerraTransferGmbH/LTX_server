@@ -40,7 +40,8 @@ http://localhost/ltx/sw/w_php/w_pcp.php?s=26FEA299F444F836&k=ABC&cmd=iparamunpen
  * k: AccessKey (aus 'quota_days.dat') (opt.)
  * s: MAC(16-Digits) (opt.)
  * d: Debug-Level (1,2) - erfordert k=S_API_KEY, aktiviert pcplog-Logging
- * 
+ * orbc: Mess-/Offset-Periode (par[6],par[7]) nicht pruefen (Orbcomm; gilt fuer iparam + iparamchange)
+ *
  * cmd:
  * '':		Version
  * list:	Alle MACs mit Zugriff auflisten (nur 'k' benoetigt)
@@ -273,8 +274,10 @@ try {
 		if(nverify($par[3],0,255)) return "304 HK_FLAGS out of range";
 		if(strlen($par[4])!= 10) return "305 Cookie (must be exactly 10 Digits)";
 		if(strlen($par[5])>41) return "306 Device Name Len"; // len=0: Use DefaultAdvertising Name
-		if(nverify($par[6],10,86400)) return "307 Measure Period out of range";
-		if(nverify($par[7],0,intval($par[6])-1)) return "308 Period Offset (must be < than Period)";
+		if(!isset($_REQUEST['orbc'])){ // Orbcomm: Mess-/Offset-Periode darf leer/0 sein, daher nicht pruefen
+			if(nverify($par[6],10,86400)) return "307 Measure Period out of range";
+			if(nverify($par[7],0,intval($par[6])-1)) return "308 Period Offset (must be < than Period)";
+		}
 		if(nverify($par[8],0,intval($par[6]))) return "309 Alarm Period out of range";
 		if(nverify($par[9],0,604799)) return "310 Internet Period out or range";
 		if(nverify($par[10],0,intval($par[9]))) return "311 Internet Alarm Period (must be <= than Internet Period)";

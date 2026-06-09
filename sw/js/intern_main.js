@@ -36,6 +36,7 @@ var globalErrCnt = -1;
 var globalWarnCnt = -1;
 
 var userAnzDevices; // Number of User's devices
+var userListFp; // Membership fingerprint of the device list (from w_main.php) to detect reshuffles
 var deviceWList = []; // Source Data from Worker
 var deviceXList = []; // extra Data Viewer (HTML etc)
 var lastSeenTimestamp = 0; // Parameter 'last': Last DB-Time
@@ -618,12 +619,17 @@ function user_poll(jcmd) {
 				document.title = prgShortName + " '" + userName + "'";
 			}
 
-			if (data.anz_devices != userAnzDevices) { // Check Number of Devices
+			// Rebuild on ANY membership change: a different count, OR a count-neutral reshuffle
+			// (one device added + one removed in the same window) caught via list_fp. Without the
+			// fp check the delta idx below could overwrite the wrong row / misroute its actions.
+			if (data.anz_devices != userAnzDevices ||
+				(data.list_fp != undefined && data.list_fp !== userListFp)) {
 				userAnzDevices = data.anz_devices;
 				if (anzW != userAnzDevices) {
-					lastSeenTimestamp = 0; // Force full reload on next poll
+					lastSeenTimestamp = 0; // Not a full snapshot -> fetch one next poll
 					return;
 				}
+				userListFp = data.list_fp; // snapshot matches current set: remember membership
 
 				var devLiParent = $("#deviceList"); // Something changed: Rebuild Device List
 				devLiParent.empty();

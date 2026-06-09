@@ -767,6 +767,22 @@ try {
 		// Quick Check all user's devices for changes OWN first
 		$devices = array();
 
+		// Membership fingerprint over the ordered device ids (owned + guest). The client uses
+		// it to detect count-NEUTRAL reshuffles (e.g. one device added and one removed within
+		// the same poll window) that the anz_devices check alone misses and that would otherwise
+		// map idx onto the wrong row. Deterministic (ORDER BY id): an unchanged set -> same fp.
+		if ($urole & 65536) {
+			$fp_stmt = $pdo->query("SELECT id FROM devices ORDER BY id");
+		} else {
+			$fp_stmt = $pdo->prepare("SELECT id FROM devices WHERE owner_id = ? ORDER BY id");
+			$fp_stmt->execute(array($user_id));
+		}
+		$fp_ids = $fp_stmt->fetchAll(PDO::FETCH_COLUMN, 0);
+		$fp_stmt = $pdo->prepare("SELECT devices.id FROM devices INNER JOIN guest_devices ON devices.mac = guest_devices.mac WHERE guest_devices.guest_id = ? ORDER BY devices.id");
+		$fp_stmt->execute(array($user_id));
+		$fp_gids = $fp_stmt->fetchAll(PDO::FETCH_COLUMN, 0);
+		$ret['list_fp'] = crc32(implode(',', $fp_ids) . '|' . implode(',', $fp_gids));
+
 		if ($dblast) {
 			// Subsequent poll: lightweight id scan for idx mapping, then only changed devices
 			if ($urole & 65536) {

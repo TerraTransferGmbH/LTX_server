@@ -9,6 +9,16 @@
 
 "use strict";
 
+// Escape user-supplied text before putting it into innerHTML (prevents stored XSS,
+// e.g. a device name like <img src=x onerror=...>). Use for any server-provided string
+// that ends up in an HTML string rather than textContent/innerText.
+function escapeHtml(s) {
+	if (typeof s != 'string') return s;
+	return s.replace(/[&<>"']/g, function (c) {
+		return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+	});
+}
+
 // ------- Globals --------------
 var prgVersion = "V0.70 (19.11.2024)";
 var prgName = "LTX - MicroCloud" + prgVersion;
@@ -641,7 +651,7 @@ function user_poll(jcmd) {
 					}
 
 					if (typeof adev.name == 'string' && adev.name.length > 0) {
-						hstr += " '" + adev.name + "'";
+						hstr += " '" + escapeHtml(adev.name) + "'";
 					}
 					hstr += "</b></a>";
 
@@ -714,7 +724,7 @@ function user_poll(jcmd) {
 					var cont = "MAC: " + adev.mac;
 
 					if (typeof adev.name == 'string' && adev.name.length > 0) {
-						cont += " '" + adev.name + "'";
+						cont += " '" + escapeHtml(adev.name) + "'";
 					}
 
 					cont += ": " + ll('newmult') + "&nbsp;" + ll('linesdata') + ":&nbsp;" + nlc;

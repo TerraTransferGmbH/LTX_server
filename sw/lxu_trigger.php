@@ -183,7 +183,23 @@ function run_trigger($p_mac, $p_reason, $p_vpnf = null) {
 
 	try {
 
-	// --- Now check files ---
+	// --- Connect to DB first, then serialize per MAC ---
+	db_init();
+
+	// Per-MAC advisory lock: the same MAC can appear several times in trigger_queue, so
+	// multiple workers may target it at once (SKIP LOCKED only guards a single queue row).
+	// Without this, each would scandir in_new/ and import the SAME files -> duplicate rows
+	// in m$mac. Whoever holds the lock drains in_new/ completely; a waiting worker re-scans
+	// afterwards (finding it empty, or any files that arrived in the meantime).
+	$lockname = "ltxtrig_$mac";
+	if ($pdo->query("SELECT GET_LOCK(" . $pdo->quote($lockname) . ", 30)")->fetchColumn() != 1) {
+		$xlog .= "(skipped: '$mac' busy in other worker)";
+		$pdo = null;	// release lock / close connection
+		add_logfile();
+		return;
+	}
+
+	// --- Now check files (AFTER the lock, so the list reflects the current directory) ---
 	$dpath = S_DATA . "/$mac/in_new";		// Device Path (must exist)
 
 	$flist = @scandir($dpath, SCANDIR_SORT_NONE);
@@ -197,9 +213,6 @@ function run_trigger($p_mac, $p_reason, $p_vpnf = null) {
 	$cpath = S_DATA . "/$mac/cmd";		// Path (UPPERCASE recommended, must exist)
 
 	if ($dbg) echo "*$fcnt Files in '$dpath'*\n";
-
-	// --- Connect to DB ---
-	db_init();
 
 	// --- Save incomming data in database devices ---
 	if ($pdo->query("SHOW TABLES LIKE 'm$mac'")->rowCount() === 0) { // No Table for this Device
@@ -534,6 +547,8 @@ function run_trigger($p_mac, $p_reason, $p_vpnf = null) {
 					$sqs = CELLOC_SERVER_URL . '?k=' . G_API_KEY . "&s=$mac&mcc=" . $cell['mcc'] . "&net=" . $cell['net'] . "&lac=" . $cell['lac'] . "&cid=" . $cell['cid'];
 					$ch = curl_init($sqs);
 					curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+					curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);	// don't let a hanging cell server
+					curl_setopt($ch, CURLOPT_TIMEOUT, 5);			// block the worker (and the per-MAC lock)
 					$result = curl_exec($ch);
 					if (curl_errno($ch))	$xlog .= "(ERROR: curl:'" . curl_error($ch) . "')";
 					curl_close($ch);
@@ -759,7 +774,9 @@ function run_trigger($p_mac, $p_reason, $p_vpnf = null) {
 		fclose($log);
 	}
 
-	// Close DB before external push (free resources while waiting for remote server)
+	// Done with DB work for this MAC: release the per-MAC lock, then close DB before
+	// external push (free resources while waiting for remote server)
+	$pdo->query("SELECT RELEASE_LOCK(" . $pdo->quote($lockname) . ")");
 	$pdo = null;
 
 	// 4a. 'v' pushes ALWAYS to vpnf/ipush.php
@@ -834,6 +851,7 @@ function run_trigger($p_mac, $p_reason, $p_vpnf = null) {
 
 	} catch (Exception $e) {
 		$xlog .= "(Exception: '" . $e->getMessage() . "')";
+		$pdo = null;	// drop connection on error -> releases any held per-MAC lock (db_init reconnects next call)
 	}
 
 	add_logfile();

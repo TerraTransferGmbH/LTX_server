@@ -798,25 +798,44 @@ function run_trigger($p_mac, $p_reason, $p_vpnf = null) {
 	$push_retry_file = S_DATA . "/$mac/push_retry.dat";
 	$push_urls = array();
 
-	// Load failed push from last run (retry)
+	// Load failed pushes from last run (one line per receiver, each retried once)
 	if (file_exists($push_retry_file)) {
-		$retry_url = trim(file_get_contents($push_retry_file));
-		if (strlen($retry_url)) $push_urls[] = array($retry_url, true);
+		foreach (file($push_retry_file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $retry_url) {
+			$retry_url = trim($retry_url);
+			if (strlen($retry_url)) $push_urls[] = array($retry_url, true);
+		}
 		unlink($push_retry_file);
 	}
 
+	// Written-data id range, appended to every pull-trigger so the receiver fetches exactly
+	// the new rows (0/0 if no data, prev_max/prev_max if nothing new was written).
+	if ($min_written_id !== null) $id_suffix = "&minid=$min_written_id&maxid=$max_written_id";
+	else $id_suffix = "&minid=$prev_max_id&maxid=$prev_max_id";
+
+	// Primary webhook from quota_days.dat line 3 ("url [key ...]")
 	if (isset($quota[2]) && strlen($quota[2])) {
 		$qpar = explode(' ', trim(preg_replace('/\s+/', ' ', $quota[2])));
 		if (count($qpar) && $qpar[0] != '*') { // No Push for '*'
 			$qpush = $qpar[0] . "?s=$mac";
 			if (count($qpar) >= 2) $qpush = $qpush . "&k=" . $qpar[1];	// Opt. Key
-			// Add written data IDs (0/0 if no data, prev_max/prev_max if no new data written)
-			if ($min_written_id !== null) {
-				$qpush .= "&minid=$min_written_id&maxid=$max_written_id";
-			} else {
-				$qpush .= "&minid=$prev_max_id&maxid=$prev_max_id";
-			}
-			$push_urls[] = array($qpush, false);
+			$push_urls[] = array($qpush . $id_suffix, false);
+		}
+	}
+
+	// Additional per-device webhooks: <MAC>/hooks.dat, one "url [key]" per line (# = comment).
+	// Same pull-trigger model: each receiver is pinged with the new id range and its OWN key,
+	// then fetches the data via w_pcp.php. The key must be a valid access key for this MAC
+	// (listed in quota_days.dat line 3, or S_API_KEY), otherwise the receiver's pull is denied.
+	$hooks_file = S_DATA . "/$mac/hooks.dat";
+	if (file_exists($hooks_file)) {
+		foreach (file($hooks_file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $hline) {
+			$hline = trim($hline);
+			if ($hline === '' || $hline[0] == '#') continue;	// blanks / comments
+			$hpar = explode(' ', preg_replace('/\s+/', ' ', $hline));
+			if ($hpar[0] === '' || $hpar[0] == '*') continue;
+			$hpush = $hpar[0] . "?s=$mac";
+			if (count($hpar) >= 2 && strlen($hpar[1])) $hpush .= "&k=" . $hpar[1];	// per-hook key
+			$push_urls[] = array($hpush . $id_suffix, false);
 		}
 	}
 
@@ -840,8 +859,9 @@ function run_trigger($p_mac, $p_reason, $p_vpnf = null) {
 		if (curl_errno($ch)) {
 			$xlog .= "(ERROR: $plabel:'$purl':(" . curl_errno($ch) . "):'" . curl_error($ch) . "')";
 
-			// Save failed push for retry on next trigger run (only current, not re-retry)
-			if (!$is_retry) file_put_contents($push_retry_file, $purl);
+			// Save failed push for retry on next trigger run (one line per receiver;
+			// only current, not re-retry -> each failed push is retried exactly once)
+			if (!$is_retry) file_put_contents($push_retry_file, $purl . "\n", FILE_APPEND);
 		} else $xlog .= "($plabel:'" . parse_url($purl, PHP_URL_HOST) . "':$cstat)";
 		curl_close($ch);
 	}

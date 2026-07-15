@@ -130,7 +130,7 @@ function call_trigger($mac, $reason)
 	$server .= $_SERVER['SERVER_NAME'];
 	$rpos = strrpos($self, '/'); // Same Level
 	$tscript = substr($self, 0, $rpos) . "/lxu_trigger.php";
-	$arg = "k=" . S_API_KEY . "&r=$reason&s=$mac";	// Parameter: API-KEY, reason and MAC
+	$arg = "k=" . S_API_KEY . "&r=$reason&s=$mac&v&orbc";	// Parameter: API-KEY, reason and MAC
 	$clog = "(trigger(MAC:$mac: Reason:$reason))";
 	$ch = curl_init("$server:$port$tscript?$arg");
 	curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);

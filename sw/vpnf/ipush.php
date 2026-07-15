@@ -1,5 +1,5 @@
 <?php
-define('VERSION', "V1.5 30.11.2023");
+define('VERSION', "V1.6 15.07.2026 (SFTP)");
 /* ipush.php - internal immerdiate push 
 	http://localhost/ltx/sw/vpnf/ipush.php?s=DDC2FB99207A7E7E&k=S_API_KEY
 	http://localhost/ltx/sw/w_php/w_pcp.php?s=DDC2FB99207A7E7E&k=S_API_KEY&cmd=getdata&minid=80
@@ -17,12 +17,14 @@ define('VERSION', "V1.5 30.11.2023");
 	Protocol:
 		FTP unencrypted FTP (normally Port 21)
 		FTPSSL FTP with explizit encryption (normally Port 21)
+		SFTP SSH File Transfer Protocol (normally Port 22, requires PHP 'ssh2' extension)
 
 	Format (optional subformat after ':'): 
 		CSV Basic CSV Format - All lines as CSV (including '<>' meta lines, Separator: ';')
 		CSV0 Only data lines as CSV, else like Basic Format
 		ZRXP Simple standard ZRXP Format
-		MIS Simple MIS Format 
+		ZRXP1 Kisters-/WISKI-kompatibles ZRXP (#ZRXPVERSION3014, #TZUTC+HH:MM, #LAYOUT(timestamp,value))
+		MIS Simple MIS Format
 
 	Dir: Main directory in FTP, optionally followed Format after '/'
 		e.g. CSV-0/mydir
@@ -191,6 +193,108 @@ function transfer_ftp($prot, $local_filename, $rdir, $remote_filename, $ftp_serv
 	$xlog .= "($prot:Put '$remote_dir/$remote_filename', $putfilesize Bytes)"; // 2Slash Haupt, 1/Sub
 }
 
+// Transferiert lokales File per SFTP (SSH). Benoetigt die PHP-'ssh2'-Extension.
+function transfer_sftp($prot, $local_filename, $rdir, $remote_filename, $sftp_server, $sftp_port, $sftp_user_name, $sftp_user_pass)
+{
+    global $xlog, $dpath;
+
+    if (!function_exists('ssh2_connect')) {	// Fail gracefully instead of a fatal
+        file_put_contents("$dpath/cmd/okreply.cmd", "$prot:SSH2 ext missing");
+        exit_error("SFTP requires the PHP 'ssh2' extension (not installed)");
+    }
+
+    // Verbindung über SSH2 herstellen (SFTP läuft über SSH)
+    $conn_id = ssh2_connect($sftp_server, $sftp_port);
+    if (!$conn_id) {
+        file_put_contents("$dpath/cmd/okreply.cmd", "$prot:Connection Error");
+        exit_error("Verbindung zu '$sftp_server' fehlgeschlagen");
+    }
+    if (!ssh2_auth_password($conn_id, $sftp_user_name, $sftp_user_pass)) {
+        file_put_contents("$dpath/cmd/okreply.cmd", "$prot:Login Error");
+        exit_error("Login '$sftp_user_name' fehlgeschlagen");
+    }
+    // SFTP-Subsystem initialisieren
+    $sftp = ssh2_sftp($conn_id);
+    if (!$sftp) {
+        file_put_contents("$dpath/cmd/okreply.cmd", "$prot:SFTP Init Error");
+        exit_error("Initialisierung des SFTP-Subsystems fehlgeschlagen");
+    }
+
+    // Remote-Verzeichnis prüfen und ggf. erstellen
+    if (!empty($rdir)) {
+        // Optional: Verzeichnisnamen bereinigen (z.B. Wildcards entfernen)
+        $rdir = wildcard2name($rdir);
+        // Wenn $rdir nicht absolut ist, ermitteln wir den aktuellen Remote-Arbeitsordner
+        if ($rdir[0] !== '/') {
+            $remote_base = ssh2_sftp_realpath($sftp, '.');
+            if ($remote_base === false) {
+                file_put_contents("$dpath/cmd/okreply.cmd", "$prot:Remote Base Path Error ($sftp_server:$sftp_port)");
+                exit_error("Remote Basis-Pfad konnte nicht ermittelt werden");
+            }
+            $rdir = rtrim($remote_base, '/') . '/' . $rdir;
+        }
+        // Remote-Verzeichnispfad mit absolutem Pfad konstruieren
+        $remote_dir_path = "ssh2.sftp://{$sftp}/" . rtrim($rdir, '/');
+        if (!is_dir($remote_dir_path)) {
+            if (!@mkdir($remote_dir_path, 0777, true)) {
+                file_put_contents("$dpath/cmd/okreply.cmd", "$prot:Dir Create Error ($sftp_server:$sftp_port - $rdir)");
+                exit_error("Erstellen des Remote-Verzeichnisses '$remote_dir_path' fehlgeschlagen");
+            } else {
+                $xlog .= "(Erstellt Remote-Verzeichnis: '$remote_dir_path')";
+            }
+        }
+        // Optional: Absoluten Pfad erneut ermitteln, um den tatsächlichen Pfad zu bestätigen
+        $real_remote_dir = ssh2_sftp_realpath($sftp, $rdir);
+        if ($real_remote_dir !== false) {
+            $rdir = $real_remote_dir;
+        } else {
+            $xlog .= "(Warnung: realpath konnte für '$rdir' nicht ermittelt werden)";
+        }
+    } else {
+        $rdir = "";
+    }
+
+    // Lokale Datei öffnen
+    $loc_filehandle = @fopen($local_filename, "r");
+    if ($loc_filehandle === false) {
+        file_put_contents("$dpath/cmd/okreply.cmd", "$prot:Read Error");
+        exit_error("Datei '$local_filename' nicht gefunden");
+    }
+    $putfilesize = filesize($local_filename);
+
+    // Remote-Dateipfad zusammenbauen
+    if (strlen($rdir)) {
+        $remote_path = "ssh2.sftp://{$sftp}" . rtrim($rdir, '/') . '/' . $remote_filename;
+    } else {
+        $remote_path = "ssh2.sftp://{$sftp}" . $remote_filename;
+    }
+
+    // Remote-Datei zum Schreiben öffnen
+    $rem_filehandle = @fopen($remote_path, 'w');
+    if ($rem_filehandle === false) {
+        file_put_contents("$dpath/cmd/okreply.cmd", "$prot:Put Error");
+        exit_error("Öffnen der Remote-Datei '$remote_path' fehlgeschlagen");
+    }
+    // Timeout auf 5 Sekunden setzen
+    stream_set_timeout($rem_filehandle, 5);
+
+    // Datei übertragen
+    $bytes_copied = stream_copy_to_stream($loc_filehandle, $rem_filehandle);
+    $meta = stream_get_meta_data($rem_filehandle);
+    if ($meta['timed_out']) {
+        file_put_contents("$dpath/cmd/okreply.cmd", "$prot:Timeout Error");
+        exit_error("Übertragung von '$remote_path' hat den Timeout von 5 Sekunden überschritten");
+    }
+    if ($bytes_copied === false || $bytes_copied != $putfilesize) {
+        file_put_contents("$dpath/cmd/okreply.cmd", "$prot:Put Error");
+        exit_error("Übertragung von '$remote_path' fehlgeschlagen");
+    }
+    fclose($loc_filehandle);
+    fclose($rem_filehandle);
+
+    $xlog .= "($prot:Put '$remote_path', $putfilesize Bytes)";
+}
+
 function get_pcp($xcmd) // xcmd ohne cmd, aber Parameter URL codiert, e.g. iparam&minid=123
 {
 	global $mac;
@@ -268,25 +372,36 @@ function convert2csv($subf)
 }
 
 // --- ZXRP Format ---
-function convert2zxrp()
+// $kisters=false: Legacy ZRXP. $kisters=true: ZRXP1 = Kisters-/WISKI-kompatibles ZRXP.
+// ZRXP1-Blockformat exakt nach Referenz (E02A_..-expected.zrxp): pro Kanal ein eigener Block mit
+// #ZRXPVERSION / #CDASANAME<Station> / #CNAMEChan<Nr> / #CUNIT<Einheit> / #TZUTC+HH:MM / #LAYOUT(timestamp,value).
+function convert2zxrp($kisters = false)
 {
 	global $fdata, $xlines; // Input - Output
 	global $station; // Als Serial
 	global $tzutc, $devutc_off;	// Timezones-Info
 
-	$dsno = $station;	// Destination Serial No 
+	$dsno = $station;	// Destination Serial No
 	$chans = explode(' ', $fdata->overview->units);
 	$anz_kans = count($chans);
 	$anz_lines = count($fdata->get_data);
 	$xlines = array();
-	$xhdr = "\n";	// Leerzeile am Anfang!
-	$xhdr = "#TZUTC";
-	if($devutc_off>0)  $xhdr .= '+'. round($devutc_off/3600,2);
-	else if($devutc_off<0) $xhdr .= '-'. round(-$devutc_off/3600,2);
-	else $xhdr .= '0';	// 0 Special zxrp
-	$xhdr .="|*|\n";	// Timezone
 
-	$xlines[] = $xhdr;
+	// Timezone-Header. Kisters (ZRXP1) erwartet vollstaendiges "+HH:MM".
+	$utchdr = "#TZUTC";
+	if ($kisters) {
+		if ($devutc_off > 0)      $utchdr .= '+' . gmdate("H:i", $devutc_off);
+		else if ($devutc_off < 0) $utchdr .= '-' . gmdate("H:i", -$devutc_off);
+		else                      $utchdr .= '+00:00';
+	} else {
+		if ($devutc_off > 0)      $utchdr .= '+' . round($devutc_off / 3600, 2);
+		else if ($devutc_off < 0) $utchdr .= '-' . round(-$devutc_off / 3600, 2);
+		else                      $utchdr .= '0';	// 0 Special zxrp
+	}
+	$utchdr .= "|*|\n";	// Timezone
+
+	if (!$kisters) $xlines[] = $utchdr;	// Legacy: Timezone einmal oben (ZRXP1: pro Kanalblock)
+
 	for ($kan = 0; $kan < $anz_kans; $kan++) {
 		$kex = explode(':', $chans[$kan]);
 		$kno = $kex[0];	// Kanal-Nummer
@@ -299,15 +414,30 @@ function convert2zxrp()
 			for ($ik = 0; $ik < count($lex); $ik++) {
 				$lik = explode(':', $lex[$ik]);
 				if (!strcmp($lik[0], $kno)) {
-					if (!$klcnt) { // Header wenn neu
-						$xlines[] = "\n";
-						$xlines[] = "#REXCHANGE$dsno" . "_KANAL$kno|*|\n";
-						$xlines[] = "##CCHANNEL_KANAL$kno|*|CCHANNELNO$kno|*|CUNIT$kunit|*|\n";
+					if (!$klcnt) { // Kanal-Header nur einmal, vor der ersten Datenzeile
+						if ($kisters) {	// Kisters/WISKI-Block, exakt nach Referenzdatei
+							$xlines[] = "\n";	// Leerzeile vor jedem Block
+							$xlines[] = "#ZRXPVERSION3014|*|ZRXPCREATORLTXGATEWAY|*|\n";
+							$xlines[] = "#CDASANAME$dsno|*|\n";
+							$xlines[] = "#CNAMEChan$kno|*|\n";
+							$xlines[] = "#CUNIT$kunit|*|\n";
+							$xlines[] = $utchdr;
+							$xlines[] = "#LAYOUT(timestamp,value)|*|\n";
+						} else {
+							$xlines[] = "\n";
+							$xlines[] = "#REXCHANGE$dsno" . "_KANAL$kno|*|\n";
+							$xlines[] = "##CCHANNEL_KANAL$kno|*|CCHANNELNO$kno|*|CUNIT$kunit|*|\n";
+						}
 						$klcnt = 3;
 					}
 					$dtsec = date_create($lobj->calc_ts, $tzutc)->getTimestamp();
 					$ldtcomp = gmdate("YmdHis", $dtsec + $devutc_off); // Corrected Timestamp
-					$xlines[] = $ldtcomp . "\t" . $lik[1] . "\n";
+					if ($kisters) {	// auf 3 NK runden, kein "-0", keine Exponentialschreibweise
+						$lval = (round($lik[1], 3) == 0) ? 0 : round($lik[1], 3);
+						$xlines[] = $ldtcomp . "\t" . $lval . "\n";
+					} else {
+						$xlines[] = $ldtcomp . "\t" . $lik[1] . "\n";
+					}
 					$klcnt++;
 					break;
 				}
@@ -397,7 +527,11 @@ if ($dbg) {
 $tempfile  = '../' . S_DATA . "/stemp";
 if (!file_exists($tempfile)) mkdir($tempfile);
 $tempfile  .= "/$mac.ftp"; // unique_string - working file
-$ipar_obj = get_pcp("iparam"); // No Return on Error
+// orbc: Perioden-Validierung (par[6]/par[7]) ueberspringen. Orbcomm-iparams haben Period=0
+// ("unbekannt") -> checkiparam wuerde sonst mit "307" ablehnen und ipush haette kein iparam.
+// Fuer Nicht-Orbcomm harmlos: ipush nutzt die Periode nicht, alle von ipush gelesenen Felder
+// (par[11] UTC-Offset, par[19] ConfigCommand, Kanaele) bleiben validiert.
+$ipar_obj = get_pcp("iparam&orbc"); // No Return on Error
 if ($ipar_obj->iparam_meta->chan0_idx < 20) exit_error("No ConfigCommand in iparam");
 $okreply = "OK";
 $configCmd = trim($ipar_obj->iparam[19]->line);
@@ -415,7 +549,7 @@ if($devutc_off<-43200 || $devutc_off>43200){
 
 $prot = strtok($configCmd, " ");
 if ($prot !== false) {
-	if ($prot !== "FTP" && $prot !== "FTPSSL") {
+	if ($prot !== "FTP" && $prot !== "FTPSSL" && $prot !== "SFTP") {
 		file_put_contents("$dpath/cmd/okreply.cmd", "Error:Unkn.Protocol");
 		exit_error("Unkn.Protocol('$prot')");
 	}
@@ -443,6 +577,10 @@ if ($prot !== false) {
 			$defext = "zrxp";
 			if ($subformat !== false) unset($format); // Keine Subformate
 			break;
+		case 'ZRXP1':	// Kisters-/WISKI-kompatibles ZRXP
+			$defext = "zrxp";
+			if ($subformat !== false) unset($format); // Keine Subformate
+			break;
 		case 'MIS':	// Legacy MIS
 			$defext = "mis";
 			if ($subformat !== false) unset($format); // Keine Subformate
@@ -465,6 +603,9 @@ if ($prot !== false) {
 		case 'ZRXP':	// Legacy ZRXP
 			convert2zxrp();
 			break;
+		case 'ZRXP1':	// Kisters-/WISKI-kompatibles ZRXP
+			convert2zxrp(true);
+			break;
 		case 'MIS':	// Legacy MIS
 			convert2mis();
 			break;
@@ -482,10 +623,14 @@ if ($prot !== false) {
 
 	file_put_contents($tempfile, $xlines); // Fkt OK for array
 
-	$sslflag = ($prot == "FTPSSL");
-	if (strpos($station, '.') == false) $station .= '.' . $defext;
+	if (strpos($station, '.') === false) $station .= '.' . $defext;
 
-	transfer_ftp($prot, $tempfile, $sdir, $station, $fhost, $sslflag, $fport, $fuser, $fpassword);
+	if ($prot == "SFTP") {
+		transfer_sftp($prot, $tempfile, $sdir, $station, $fhost, $fport, $fuser, $fpassword);
+	} else {
+		$sslflag = ($prot == "FTPSSL");
+		transfer_ftp($prot, $tempfile, $sdir, $station, $fhost, $sslflag, $fport, $fuser, $fpassword);
+	}
 	@unlink($tempfile);
 	$okreply = "$prot:OK";
 	$minid = $minid + $fdata->get_count;

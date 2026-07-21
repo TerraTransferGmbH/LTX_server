@@ -51,7 +51,7 @@ function exit_error($err)
 {
 	global $xlog;
 	echo "ERROR: '$err'\n";
-	$xlog .= "(ERROR:'$err')";
+	$xlog .= "(EXPORT FAIL: '$err')";	// ipush bricht immer wegen eines Export-Problems ab
 	add_logfile();
 	exit();
 }
@@ -251,7 +251,11 @@ function transfer_sftp($prot, $local_filename, $rdir, $remote_filename, $sftp_se
             $xlog .= "(Warnung: realpath konnte für '$rdir' nicht ermittelt werden)";
         }
     } else {
-        $rdir = "";
+        // Kein Unterverzeichnis: ins Home-/Startverzeichnis des SFTP-Users schreiben.
+        // MUSS absolut sein, sonst fehlt im ssh2.sftp://-Pfad der '/' zwischen Ressource und
+        // Dateiname und fopen scheitert (Bug bei ConfigCmd ohne /DIR, dem Standard-Kisters-Fall).
+        $rdir = ssh2_sftp_realpath($sftp, '.');
+        if ($rdir === false) $rdir = ".";
     }
 
     // Lokale Datei öffnen
@@ -433,7 +437,10 @@ function convert2zxrp($kisters = false)
 					$dtsec = date_create($lobj->calc_ts, $tzutc)->getTimestamp();
 					$ldtcomp = gmdate("YmdHis", $dtsec + $devutc_off); // Corrected Timestamp
 					if ($kisters) {	// auf 3 NK runden, kein "-0", keine Exponentialschreibweise
-						$lval = (round($lik[1], 3) == 0) ? 0 : round($lik[1], 3);
+						// Orbcomm liefert String-Fehlerwerte (z.B. "NoValue"/"Error") -> round() wuerfe
+						// unter PHP 8 einen TypeError. Solche Werte roh durchreichen (wie Legacy-ZRXP).
+						if (is_numeric($lik[1])) $lval = (round($lik[1], 3) == 0) ? 0 : round($lik[1], 3);
+						else $lval = $lik[1];
 						$xlines[] = $ldtcomp . "\t" . $lval . "\n";
 					} else {
 						$xlines[] = $ldtcomp . "\t" . $lik[1] . "\n";
@@ -633,6 +640,7 @@ if ($prot !== false) {
 	}
 	@unlink($tempfile);
 	$okreply = "$prot:OK";
+	$xlog .= "(EXPORT OK: $prot -> $fhost '$station')";	// nur erreichbar wenn transfer nicht per exit_error abbricht
 	$minid = $minid + $fdata->get_count;
 } else {
 	$minid = $ipar_obj->overview->max_id + 1;	// Ignore
@@ -647,7 +655,7 @@ $xlog .= "(Run:$mtrun msec)"; // Script Runtime
 
 echo "*IPUSH(DBG:$dbg) RES: ('$xlog')*\n"; // Always
 
-} catch (Exception $e) {
+} catch (Throwable $e) {	// Throwable statt Exception: faengt auch Error/TypeError (sonst stiller Fatal)
 	$errm = $e->getMessage();
 	exit_error($errm);
 }

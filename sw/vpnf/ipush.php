@@ -44,6 +44,7 @@ include("../conf/config.inc.php");	// DB Access Param
 include("../inc/db_funcs.inc.php"); // Init DB
 
 set_time_limit(600); // 10 Min runtime
+ignore_user_abort(true); // Push-Ping (lxu_trigger) hat kurzen curl-Timeout -> Export serverseitig zu Ende fuehren
 
 
 // --- Functons --------
@@ -530,6 +531,16 @@ if ($dbg) {
 	echo "*** ipush.php " . VERSION . " ***\n";
 }
 
+// Nur EIN ipush pro MAC gleichzeitig. Der Push-Ping hat kurzen curl-Timeout, der Export dauert
+// laenger -> lxu_trigger ruft ihn ggf. ueberlappend erneut auf. Ohne Lock wuerden zwei Laeufe
+// denselben Datenbereich exportieren bzw. das gemeinsame Tempfile korrumpieren.
+$ipush_lock = @fopen("$dpath/ipush.lock", 'c');
+if (!$ipush_lock || !flock($ipush_lock, LOCK_EX | LOCK_NB)) {
+	$xlog .= "(skip: ipush laeuft bereits fuer $mac)";
+	add_logfile($xlog);
+	exit();
+}
+
 // --- START ---
 $tempfile  = '../' . S_DATA . "/stemp";
 if (!file_exists($tempfile)) mkdir($tempfile);
@@ -628,20 +639,27 @@ if ($prot !== false) {
 		die("---DBG STOP---"); 
 	}
 
-	file_put_contents($tempfile, $xlines); // Fkt OK for array
+	if ($fdata->get_count > 0) {	// nur exportieren wenn es neue Daten gibt (kein Leerdatei-Upload)
+		file_put_contents($tempfile, $xlines); // Fkt OK for array
 
-	if (strpos($station, '.') === false) $station .= '.' . $defext;
+		if (strpos($station, '.') === false) $station .= '.' . $defext;
 
-	if ($prot == "SFTP") {
-		transfer_sftp($prot, $tempfile, $sdir, $station, $fhost, $fport, $fuser, $fpassword);
+		if ($prot == "SFTP") {
+			transfer_sftp($prot, $tempfile, $sdir, $station, $fhost, $fport, $fuser, $fpassword);
+		} else {
+			$sslflag = ($prot == "FTPSSL");
+			transfer_ftp($prot, $tempfile, $sdir, $station, $fhost, $sslflag, $fport, $fuser, $fpassword);
+		}
+		@unlink($tempfile);
+		$okreply = "$prot:OK";
+		$xlog .= "(EXPORT OK: $prot -> $fhost '$station', " . $fdata->get_count . " Zeilen)";
+		// Wasserzeichen: hoechste GELIEFERTE id +1 (robust gegen ID-Luecken durch Quota-Trim;
+		// count-basiert wuerde bei Luecken Duplikat-Re-Exporte erzeugen).
+		$minid = $fdata->get_data[$fdata->get_count - 1]->id + 1;
 	} else {
-		$sslflag = ($prot == "FTPSSL");
-		transfer_ftp($prot, $tempfile, $sdir, $station, $fhost, $sslflag, $fport, $fuser, $fpassword);
+		$okreply = "$prot:OK";	// nichts Neues -> kein Upload, Wasserzeichen unveraendert
+		$xlog .= "(EXPORT: $prot, keine neuen Daten)";
 	}
-	@unlink($tempfile);
-	$okreply = "$prot:OK";
-	$xlog .= "(EXPORT OK: $prot -> $fhost '$station')";	// nur erreichbar wenn transfer nicht per exit_error abbricht
-	$minid = $minid + $fdata->get_count;
 } else {
 	$minid = $ipar_obj->overview->max_id + 1;	// Ignore
 }

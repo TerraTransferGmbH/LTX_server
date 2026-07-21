@@ -847,7 +847,10 @@ function run_trigger($p_mac, $p_reason, $p_vpnf = null) {
 		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 		curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
 		curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 2);
-		curl_setopt($ch, CURLOPT_TIMEOUT, 2);
+		// vpnf/ipush macht den kompletten Export synchron (SFTP-Upload) -> braucht mehr als die 2s
+		// eines leichten Webhook-Pings, sonst Timeout -> Retry -> ueberlappende Doppelaufrufe.
+		$is_ipush = (strpos($purl, '/vpnf/ipush.php') !== false);
+		curl_setopt($ch, CURLOPT_TIMEOUT, $is_ipush ? 120 : 2);
 		$cres = curl_exec($ch);
 		$cinfo = curl_getinfo($ch);
 		if (isset($cinfo['http_code'])) {
@@ -860,8 +863,9 @@ function run_trigger($p_mac, $p_reason, $p_vpnf = null) {
 			$xlog .= "(ERROR: $plabel:'$purl':(" . curl_errno($ch) . "):'" . curl_error($ch) . "')";
 
 			// Save failed push for retry on next trigger run (one line per receiver;
-			// only current, not re-retry -> each failed push is retried exactly once)
-			if (!$is_retry) file_put_contents($push_retry_file, $purl . "\n", FILE_APPEND);
+			// only current, not re-retry -> each failed push is retried exactly once).
+			// ipush ausgenommen: idempotent via ppinfo + eigenem Lock; Retry waere nur ein Doppelaufruf.
+			if (!$is_retry && !$is_ipush) file_put_contents($push_retry_file, $purl . "\n", FILE_APPEND);
 		} else $xlog .= "($plabel:'" . parse_url($purl, PHP_URL_HOST) . "':$cstat)";
 		curl_close($ch);
 	}

@@ -176,7 +176,7 @@ function run_trigger($p_mac, $p_reason, $p_vpnf = null) {
 	$xlog = "(trigger:$reason)";
 
 	if (!isset($mac) || strlen($mac) != 16) {
-		exit_error("MAC Len");
+		$xlog .= "(ERROR: MAC Len)"; add_logfile(); return;	// kein exit() -> wuerde inline den trigger_worker killen
 	}
 
 	if (@file_exists(S_DATA . "/$mac/cmd/dbg.cmd")) $dbg = 1; // Allow Individual Debug
@@ -204,7 +204,7 @@ function run_trigger($p_mac, $p_reason, $p_vpnf = null) {
 
 	$flist = @scandir($dpath, SCANDIR_SORT_NONE);
 	if (!$flist) {
-		exit_error("MAC Unknown");
+		throw new Exception("MAC Unknown");	// kein exit() -> vom eigenen catch gefangen (Lock frei), Worker laeuft weiter
 	}
 	usort($flist, "flcmp");	// Now Compared by Filenames
 	$fcnt = count($flist) - 2;   // Without . and ..
@@ -236,7 +236,7 @@ function run_trigger($p_mac, $p_reason, $p_vpnf = null) {
 			PRIMARY KEY (`id`),
 			INDEX idx_line_ts (`line_ts`)
 			) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;");
-		if ($qres === false) exit_error("(ERROR 104:" . $pdo->errorInfo()[2] . ")"); // Can not Create Table
+		if ($qres === false) throw new Exception("Create Table m$mac: " . $pdo->errorInfo()[2]); // kein exit() -> catch faengt es
 	} else {	// Table exists, Check Entry in decices
 		$statement = $pdo->prepare("SELECT vals FROM devices WHERE mac='$mac'");
 		$statement->execute(); // Fail->Exeption
@@ -563,6 +563,10 @@ function run_trigger($p_mac, $p_reason, $p_vpnf = null) {
 						$device_nrad = $obj->accuracy;
 						$sqlps->execute(array($now, "<CELLOC $device_lat $device_lng $device_nrad>"));
 					}
+					// CELLOC-Zeile in den announced ID-Range aufnehmen (sonst sehen Hook-Empfaenger sie nie)
+					$celloc_id = $pdo->lastInsertId();
+					if ($min_written_id === null) $min_written_id = $celloc_id;
+					$max_written_id = $celloc_id;
 				}
 			}
 		}

@@ -612,6 +612,16 @@ if ($prot !== false) {
 	}
 
 	$fdata = get_pcp("getdata&minid=$minid");
+	// Stale-Wasserzeichen abfangen: wurde die Tabelle zwischenzeitlich geleert/gedroppt (z.B.
+	// service.php OverAge/RefInt), starten die ids wieder niedrig, ppinfo bleibt aber hoch ->
+	// minid > max_id -> dauerhaft 0 Zeilen + spaeter uebersprungene Daten. Dann ab Tabellenanfang neu.
+	$curmax = intval(@$fdata->overview->max_id);
+	if ($fdata->get_count == 0 && $curmax > 0 && $minid > $curmax + 1) {
+		$xlog .= "(WARNING: stale ppinfo $minid > max_id $curmax -> Reset auf Tabellenanfang)";
+		$minid = intval(@$fdata->overview->min_id);
+		if ($minid < 1) $minid = 1;
+		$fdata = get_pcp("getdata&minid=$minid");
+	}
 	// 2. Konvertieren
 	switch ($format) {
 		case 'CSV':	// OK: CSV and CSV0

@@ -598,6 +598,14 @@ try {
 				}
 				$xlog .= "(New Hardware-Parameter 'iparam.lxp':$ilen)";
 					$retResult['par_pending'] = true;
+					// Hinweis: FTP/SFTP-Export (vpnf/ipush) laeuft NUR bei LEERER quota_days.dat Zeile 3.
+					// Steht dort ein Webhook, wird der ConfigCommand ignoriert -> Operator sofort warnen.
+					$cfgcmd = trim(@$par[19]);
+					if (strlen($cfgcmd) && preg_match('/^(FTPSSL|FTP|SFTP)\b/', $cfgcmd)) {
+						$q = @file("$fpath/$mac/quota_days.dat", FILE_IGNORE_NEW_LINES);
+						if (isset($q[2]) && strlen(trim($q[2])))
+							$retResult['warning'] = "ConfigCommand fuer Export gesetzt, aber 'quota_days.dat' Zeile 3 enthaelt einen Webhook -> FTP/SFTP-Export wird NICHT ausgefuehrt. Zeile 3 leeren.";
+					}
 				} else {
 					$xlog .= "(ERROR: Write 'iparam.lxp':$slen/$ilen Bytes)";
 					$cmd_status = "107 Write Parameter";

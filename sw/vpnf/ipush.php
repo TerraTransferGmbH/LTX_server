@@ -661,7 +661,13 @@ if ($prot !== false) {
 		$xlog .= "(EXPORT: $prot, keine neuen Daten)";
 	}
 } else {
-	$minid = $ipar_obj->overview->max_id + 1;	// Ignore
+	// Kein ConfigCmd (noch kein Export): Wasserzeichen ans aktuelle Tabellenende setzen, damit beim
+	// spaeteren Aktivieren des Exports nur NEUE Daten (ab Aktivierung) gehen, NICHT die Historie.
+	// cmd=iparam liefert kein overview -> max_id per 'details' holen (enthaelt overview.max_id und
+	// bleibt auch ohne Datentabelle Status "0 OK"; getdata wuerde dort "100" -> get_pcp exit_error).
+	$ov = get_pcp("details");
+	$mx = intval(@$ov->overview->max_id);
+	$minid = ($mx > 0) ? $mx + 1 : 1;
 }
 
 file_put_contents("$dpath/cmd/okreply.cmd", $okreply); // Hat funktioniert

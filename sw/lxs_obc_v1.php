@@ -404,7 +404,7 @@ function jopay_expand($dbytes, $mutc_ts, $msno, $mid)
 				swexit:
 			default:
 				$line = "<ERROR: INVALID TOKEN $tok>";
-				if (strlen($xlog < 256)) $xlog .= "(ERROR: INVALID TOKEN $tok in Msg. $mid)";
+				if (strlen($xlog) < 256) $xlog .= "(ERROR: INVALID TOKEN $tok in Msg. $mid)";
 				$dbidx = $dbcnt; // Force Exit
 		}
 	}
@@ -582,13 +582,13 @@ for (;;) { // break-Dummy
 					$reason = $map['lastResetReason'];
 					$mline_txt = "<OBC_RESET ($reason)>";
 				}
-			} else if (strlen($xlog < 256)) $xlog .= "(ERROR: SIN/MIN: $sin/$min in Msg. $mid)";
+			} else if (strlen($xlog) < 256) $xlog .= "(ERROR: SIN/MIN: $sin/$min in Msg. $mid)";
 		} else if ($sin == 128) { // User-Messages
 			$rawPayload = $msg->RawPayload;
 			if (count($rawPayload) >= 2) { // [0] immer 128, ab 1 Jo-Payload
 				$mline_txt = jopay_expand(array_slice($rawPayload, 1), $mutc_ts, $modemsno, $mid);
 			}
-		} else if (strlen($xlog < 256)) $xlog .= "(ERROR: SIN: $sin in Msg. $mid)";
+		} else if (strlen($xlog) < 256) $xlog .= "(ERROR: SIN: $sin in Msg. $mid)";
 		if (isset($mline_txt)) add2decoded($modemsno, $mid, $mutc_ts, null, $mline_txt); // DeviceUTC only for Datalines
 	}
 

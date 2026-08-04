@@ -40,8 +40,8 @@ date_default_timezone_set('UTC'); // fuer strtotime
 //*** For Local access - if CRON not called via HTTP/HTTPS: Edit missing '$_SERVER': ***
 //*** Required for call trigger() ***
 if (!isset($_SERVER['SERVER_NAME'])) {
-	$_SERVER['SERVER_NAME'] = "joembedded.de";
-	$_SERVER['REMOTE_ADDR'] = "joembedded.de";
+	$_SERVER['SERVER_NAME'] = "localhost";
+	$_SERVER['REMOTE_ADDR'] = "localhost";
 	$_SERVER['PHP_SELF'] = "/ltx/sw/lxs_obc_v1.php";
 	$_SERVER['SERVER_PORT'] = 80;
 }

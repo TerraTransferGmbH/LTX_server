@@ -17,9 +17,10 @@ http://localhost/ltx/sw/w_php/w_pcp.php?k=ABC&cmd=list
 // Device Details (device-Eintrag aus DB)
 http://localhost/ltx/sw/w_php/w_pcp.php?s=26FEA299F444F836&k=ABC&cmd=details
 
-// Daten Zeilen aus DB ausgeben (opt. limits minid/maxid)
-http://localhost/ltx/sw/w_php/w_pcp.php?s=26FEA299F444F836&k=ABC&cmd=getdata&minid=1800 
+// Daten Zeilen aus DB ausgeben (opt. limits minid/maxid, opt. limit <= GETDATA_MAX_ROWS)
+http://localhost/ltx/sw/w_php/w_pcp.php?s=26FEA299F444F836&k=ABC&cmd=getdata&minid=1800
 http://localhost/ltx/sw/w_php/w_pcp.php?s=26FEA299F444F836&k='S_API_KEY'&cmd=getdata&minid=1800
+http://localhost/ltx/sw/w_php/w_pcp.php?s=26FEA299F444F836&k=ABC&cmd=getdata&minid=1&limit=500
 
 // Parameter 'iparam.lxp' zu diesem Device mit Beschreibung ausgeben
 http://localhost/ltx/sw/w_php/w_pcp.php?s=26FEA299F444F836&k=ABC&cmd=iparam
@@ -49,7 +50,10 @@ http://localhost/ltx/sw/w_php/w_pcp.php?s=26FEA299F444F836&k=ABC&cmd=iparamunpen
  * iparam:	Parameter-File 'iparam.lxp' zu diesem Device
  * iparamrunpend:	iparam-pendinge-loeschen
  * iparamchange:	Parameter aendern und speichern
- * getdata:	mMAC ausgeben mit opt. minid und/oder maxid
+ * getdata:	mMAC ausgeben mit opt. minid und/oder maxid. Hoechstens GETDATA_MAX_ROWS Zeilen je Abruf
+ *		(opt. kleiner per limit). Liegen mehr Zeilen im Bereich: ohne minid bzw. minid <= 1
+ *		(Erstabruf eines Empfaengers ohne Stand) die JUENGSTEN Zeilen, aeltere entfallen
+ *		(get_skipped_older); sonst die AELTESTEN, Rest ab get_next_minid (get_more: true).
  * getfile:	Datei(en) aus files/ lesen (file=data.edt, bak=1 fuer .bak dazu, limit=N)
  * deviceinfo:	device_info.dat als JSON (fw, signal, dBm..)
  * 
@@ -68,7 +72,7 @@ http://localhost/ltx/sw/w_php/w_pcp.php?s=26FEA299F444F836&k=ABC&cmd=iparamunpen
  */
 
 define('VERSION', "LTX V1.13 04.03.2026");
-define('VERSION_TT', "TT V0.1 16.03.2026");
+define('VERSION_TT', "TT V0.2 28.09.2026");
 
 error_reporting(E_ALL);
 ini_set("display_errors", true);
@@ -83,6 +87,12 @@ $now = time();
 require_once("../conf/config.inc.php");	// DB Access 
 require_once("../conf/api_key.inc.php"); // APIs
 require_once("../inc/db_funcs.inc.php"); // Init DB
+
+// Hoechstzahl Zeilen je getdata-Abruf (in conf ueberschreibbar). Ohne Grenze baute ein
+// Erstabruf ueber die ganze Geraetetabelle (bis 1 Mio. Zeilen) alles im Speicher auf und
+// brach mit 'Allowed memory size' ab; der Empfaenger bekam nichts, fragte beim naechsten
+// Push wieder ab 1 an und kam nie zu Daten (TT 28.09.2026).
+if (!defined('GETDATA_MAX_ROWS')) define('GETDATA_MAX_ROWS', 10000);
 
 $dbg = (isset($_REQUEST['d']) && $_REQUEST['k'] === S_API_KEY) ? intval($_REQUEST['d']) : 0;
 $fpath = "../" . S_DATA;	// Globaler Pfad auf Daten
@@ -635,15 +645,30 @@ try {
 			// Default ist der in der Overview ermittelte Bereich, Request-Werte koennen ihn ueberschreiben.
 			$req_minid = $minid;
 			$req_maxid = $maxid;
+			$initial = true;	// Ohne minid bzw. minid <= 1: Erstabruf (Empfaenger hat noch keinen Stand)
 			if (isset($_REQUEST['minid'])) {
 				$req_minid = intval($_REQUEST['minid']);
+				$initial = ($req_minid <= 1);
 			}
 			if (isset($_REQUEST['maxid'])) {
 				$req_maxid = intval($_REQUEST['maxid']);
 			}
 			$xlog .= "([" . $req_minid . ".." . $req_maxid . "]";
 
-			$statement = $pdo->prepare("SELECT id, line_ts, calc_ts, dataline FROM m$mac WHERE (id >= ? AND id <= ?) ORDER BY id");
+			// Obergrenze je Abruf: Erstabruf -> juengste Zeilen (aktueller Stand, aeltere Historie
+			// entfaellt), Nachholen -> aelteste Zeilen, der Empfaenger holt den Rest ab get_next_minid.
+			$row_limit = GETDATA_MAX_ROWS;
+			if (isset($_REQUEST['limit']) && intval($_REQUEST['limit']) > 0) $row_limit = min(intval($_REQUEST['limit']), GETDATA_MAX_ROWS);
+			$cntstat = $pdo->prepare("SELECT COUNT(*) FROM m$mac WHERE (id >= ? AND id <= ?)");
+			if ($cntstat->execute(array($req_minid, $req_maxid)) == false) throw new Exception("getdata count");
+			$range_cnt = intval($cntstat->fetchColumn());
+			$limited = ($range_cnt > $row_limit);
+			$gsel = "SELECT id, line_ts, calc_ts, dataline FROM m$mac WHERE (id >= ? AND id <= ?)";
+			if (!$limited) $gsql = "$gsel ORDER BY id";
+			else if ($initial) $gsql = "SELECT id, line_ts, calc_ts, dataline FROM ($gsel ORDER BY id DESC LIMIT $row_limit) AS t ORDER BY id";
+			else $gsql = "$gsel ORDER BY id LIMIT $row_limit";
+
+			$statement = $pdo->prepare($gsql);
 			$qres = $statement->execute(array($req_minid, $req_maxid));
 			if ($qres == false) throw new Exception("getdata");
 			$valarr = array();
@@ -671,6 +696,17 @@ try {
 			$retResult['get_count'] = count($valarr); // Allowed Devices
 			$retResult['get_data'] = $valarr;
 			$xlog .= "]: " . count($valarr) . " Lines)";
+			if ($limited) {
+				$retResult['get_limit'] = $row_limit;
+				$retResult['get_range_count'] = $range_cnt;
+				if ($initial) {
+					$retResult['get_skipped_older'] = $range_cnt - count($valarr);
+				} else {
+					$retResult['get_more'] = true;
+					$retResult['get_next_minid'] = count($valarr) ? $valarr[count($valarr) - 1]['id'] + 1 : $req_minid;
+				}
+				$xlog .= "(limit $row_limit of $range_cnt, " . ($initial ? "newest" : "oldest") . ")";
+			}
 
 			break;
 

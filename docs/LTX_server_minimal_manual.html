@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LTX server minimal version - manual</title><style>
+body{font-family:Arial,Helvetica,sans-serif;font-size:11pt;line-height:1.45;color:#222;max-width:900px;margin:2em auto;padding:0 1.5em}
+h1{font-size:20pt;border-bottom:2px solid #1a5276;padding-bottom:.3em;color:#1a5276}
+h2{font-size:15pt;margin-top:1.8em;color:#1a5276}
+h3{font-size:12.5pt;margin-top:1.4em}
+code{font-family:Consolas,Menlo,monospace;font-size:9.5pt;background:#f2f4f7;padding:1px 3px;border-radius:3px}
+pre{background:#f2f4f7;border:1px solid #d5dbe3;padding:.7em;overflow-x:auto;font-size:9.5pt;line-height:1.35}
+pre code{background:none;padding:0}
+table{border-collapse:collapse;width:100%;margin:.8em 0;font-size:10pt}
+th,td{border:1px solid #c9d1dc;padding:.35em .5em;vertical-align:top;text-align:left}
+th{background:#e8eef5}
+li{margin:.15em 0}
+@media print{body{max-width:none;margin:0;font-size:10pt} pre{white-space:pre-wrap} h2{page-break-after:avoid}}
+</style></head>
+<body>
+<h1 id="ltx-server-minimal-version-installation-and-operation-manual">LTX server – minimal version: installation and operation manual</h1>
+<p>Version 1.0, October 2026. (C) TerraTransfer GmbH, www.terratransfer.de</p>
+<h2 id="1-overview">1. Overview</h2>
+<p>The minimal version of the LTX server is a small PHP web application that receives the data of
+TerraTransfer LTX data loggers via HTTP or HTTPS and stores it as plain text files, one directory
+per logger. A password-protected web interface shows the status of the loggers, exports data as
+CSV, draws charts and sends parameter files or commands to the loggers.</p>
+<p>It needs no database and no connection to the Internet. The server never contacts any other
+host; the only network traffic is the loggers calling the server. All data stays on your server.</p>
+<p>Not included compared with the full LTX server: dashboard, user management, e-mail or SMS
+alarms, data push to other systems, automatic data retention, firmware updates via the server,
+map view.</p>
+<h2 id="2-requirements">2. Requirements</h2>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Requirement</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Hardware</td>
+<td>Linux or Windows, small VM or single-board computer, e.g. 1 CPU core, 1 GB RAM</td>
+</tr>
+<tr>
+<td>Web server</td>
+<td>Apache 2.4 or nginx (any version with PHP-FPM)</td>
+</tr>
+<tr>
+<td>PHP</td>
+<td>7.4 or newer, 8.x recommended; extensions <code>session</code>, <code>ctype</code>, <code>iconv</code> (default) and <code>gd</code> (charts)</td>
+</tr>
+<tr>
+<td>Disk</td>
+<td>Text files, typically 2–3 MB per logger and year at 15-minute intervals</td>
+</tr>
+<tr>
+<td>Network</td>
+<td>Loggers reach the server via HTTP or HTTPS on port 80 or 443 (LAN, VPN or private APN)</td>
+</tr>
+<tr>
+<td>Time</td>
+<td>Correct system time (UTC); the server sends its time to the loggers at every contact</td>
+</tr>
+</tbody>
+</table>
+<p>Not needed: database, mail server, cron jobs, curl, Internet access.</p>
+<h2 id="3-installation">3. Installation</h2>
+<p>The application consists of three directories: <code>sw/</code> (device endpoint and configuration),
+<code>legacy/</code> (web interface) and <code>docs/</code> (this manual). The examples below install into the
+directory <code>ltx</code> of the web root, so the URLs are <code>http://&lt;server&gt;/ltx/...</code>. Any other directory
+name works; adjust the paths accordingly.</p>
+<h3 id="31-linux-with-apache-debianubuntu">3.1 Linux with Apache (Debian/Ubuntu)</h3>
+<pre><code>sudo apt install apache2 php libapache2-mod-php php-gd
+sudo mkdir -p /var/www/html/ltx
+sudo unzip LTX_server_minimal_*.zip -d /var/www/html/        # creates /var/www/html/ltx
+sudo mkdir -p /var/lib/ltx-data
+sudo chown www-data:www-data /var/lib/ltx-data
+sudo chmod 750 /var/lib/ltx-data
+</code></pre>
+<p>Edit <code>/var/www/html/ltx/sw/conf/api_key.inc.php</code> (see section 4), then restart Apache
+(<code>sudo systemctl restart apache2</code>). On RHEL/Rocky/Alma the packages are <code>httpd php php-gd</code>
+and the web server user is <code>apache</code>.</p>
+<p>If you keep the data directory inside the web root (default <code>data_secret</code> next to <code>sw/</code>), Apache
+must honour <code>.htaccess</code> files: set <code>AllowOverride All</code> (or <code>AuthConfig</code>) for the directory in the
+virtual host. The server creates <code>data_secret/.htaccess</code> with <code>Require all denied</code> automatically.</p>
+<h3 id="32-linux-with-nginx">3.2 Linux with nginx</h3>
+<pre><code>sudo apt install nginx php-fpm php-gd
+</code></pre>
+<p>Server block (replace <code>php8.2-fpm</code> by your PHP-FPM version):</p>
+<pre><code>server {
+    listen 80;
+    server_name ltx.example.local;
+    root /var/www/html;
+    index index.php;
+
+    location ~ ^/ltx/data_secret/ { deny all; }       # only if the data directory is inside the web root
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/run/php/php8.2-fpm.sock;
+    }
+}
+</code></pre>
+<p>Create the data directory as in 3.1 (user <code>www-data</code>) and reload nginx.</p>
+<h3 id="33-windows-with-xampp">3.3 Windows with XAMPP</h3>
+<ol>
+<li>Install XAMPP (Apache + PHP 8.x) from apachefriends.org.</li>
+<li>Unpack the ZIP into <code>C:\xampp\htdocs\</code> so that <code>C:\xampp\htdocs\ltx\sw\lxu_v1.php</code> exists.</li>
+<li>In <code>C:\xampp\php\php.ini</code> make sure the line <code>extension=gd</code> is present and not commented out
+   (<code>;</code> removed). Restart Apache from the XAMPP control panel.</li>
+<li>Create a data directory, e.g. <code>C:\ltx-data</code>, and enter it in the configuration as
+   <code>C:/ltx-data</code> (forward slashes).</li>
+<li>Configure Apache as a Windows service (XAMPP control panel) so that it starts automatically.</li>
+<li>Make sure the Windows time is synchronised (the loggers take their time from the server).</li>
+</ol>
+<h3 id="34-https-optional">3.4 HTTPS (optional)</h3>
+<p>Configure HTTPS in the web server as usual (Apache <code>mod_ssl</code>, nginx <code>ssl_certificate</code>, or a
+reverse proxy). The loggers must accept the server certificate: before switching the loggers to
+HTTPS, agree with TerraTransfer which certificate (public CA or your own CA) the loggers trust.
+The web interface can be used via HTTPS without any change.</p>
+<h2 id="4-configuration">4. Configuration</h2>
+<p>All settings are in <code>sw/conf/api_key.inc.php</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>S_DATA</code></td>
+<td>Data directory. Default <code>../data_secret</code> (relative to <code>sw/</code> and <code>legacy/</code>). Recommended: an absolute path outside the web root, e.g. <code>/var/lib/ltx-data</code> or <code>C:/ltx-data</code>. The web server user needs write access.</td>
+</tr>
+<tr>
+<td><code>L_KEY</code></td>
+<td>Password of the web interface. Choose a long password; it is the only protection of the interface.</td>
+</tr>
+<tr>
+<td><code>D_API_KEY</code></td>
+<td>Device key. Every logger sends this key with each contact. The value is agreed with TerraTransfer and stored in the loggers.</td>
+</tr>
+<tr>
+<td><code>DB_QUOTA</code></td>
+<td>Initial content of <code>quota_days.dat</code> of new loggers (days, lines). Informational only in this version.</td>
+</tr>
+<tr>
+<td><code>MAXM_2GM</code>, <code>MAXM_NB</code>, <code>MXGET_MEM</code></td>
+<td>Maximum upload size per contact for 2G/LTE-M, for LTE-NB, and the multiblock limit. Keep the defaults unless TerraTransfer advises otherwise.</td>
+</tr>
+</tbody>
+</table>
+<p>The server refuses every request while <code>L_KEY</code> or <code>D_API_KEY</code> still contain the placeholder
+<code>CHANGE_ME</code>.</p>
+<p>PHP settings (<code>php.ini</code>): the defaults are sufficient. If you want to upload files larger than
+2 MB to a logger via the web interface, raise <code>upload_max_filesize</code> and <code>post_max_size</code>.
+Set <code>date.timezone = UTC</code> to avoid warnings.</p>
+<h2 id="5-connecting-the-loggers">5. Connecting the loggers</h2>
+<p>Each logger needs the following settings; they are stored in its system parameter file
+(<code>sys_param.lxp</code>) and are normally set by TerraTransfer before delivery:</p>
+<ul>
+<li>host name or IP address of the server, e.g. <code>ltx.example.local</code> or <code>192.168.1.10</code>;</li>
+<li>path of the device endpoint: <code>ltx/sw/lxu_v1.php</code> (change <code>ltx</code> if you installed elsewhere);</li>
+<li>the device key (<code>D_API_KEY</code>);</li>
+<li>HTTP or HTTPS, port 80 or 443.</li>
+</ul>
+<p>Please send these values to TerraTransfer when ordering loggers, or change them yourself via the
+web interface (section 7.4, file <code>sys_param.lxp</code>). A wrong value in <code>sys_param.lxp</code> disconnects
+the logger from the server, so change this file with care.</p>
+<p>Contact sequence: the logger calls <code>http(s)://&lt;server&gt;/ltx/sw/lxu_v1.php?k=&lt;key&gt;&amp;s=&lt;MAC&gt;</code> and
+uploads its new data (HTTP POST). The reply contains the server time and pending commands. With
+the default settings a logger measures every 15 minutes and calls the server once per hour; both
+intervals are logger parameters.</p>
+<h2 id="6-first-test">6. First test</h2>
+<ol>
+<li>Open <code>http://&lt;server&gt;/ltx/</code> in a browser. You are redirected to the web interface. Log in
+   with <code>L_KEY</code>.</li>
+<li>The device list is empty until the first logger has called. The main log
+   (<code>&lt;S_DATA&gt;/log/log.txt</code>, link "Main Logfile" on the start page) shows every contact, including
+   rejected ones, e.g. <code>(ERROR:'API Key')</code> for a wrong device key.</li>
+<li>After the first contact the logger appears in the list with its MAC address (16 hex digits)
+   and its name. Open the device page and check "Last Contact" and "Files on Device". The first
+   contacts transfer the directory listing and the parameter files; data follows with the next
+   regular upload.</li>
+</ol>
+<h2 id="7-web-interface">7. Web interface</h2>
+<h3 id="71-login-guest-mode-and-demo-mode">7.1 Login, guest mode and demo mode</h3>
+<p><code>legacy/index.php</code> is the start page. Without login the page is in guest mode (read-only) and
+shows only loggers that were marked as demo devices ("Enable Demo-Mode" on the start page after
+login). Logging in with <code>L_KEY</code> gives full access; "Logout" ends the session. The pages refresh
+automatically every 15–30 seconds.</p>
+<h3 id="72-device-list">7.2 Device list</h3>
+<p>For each logger the list shows the MAC address (link to the device page), the device name from
+<code>iparam.lxp</code>, the "legacy name" (a free text you can set on the server), the country of the mobile
+network and the time of the last contact. The colour of the last contact shows how long ago it
+was: green = less than 2 minutes, light yellow = more than 2 hours, yellow = more than 4 hours,
+pink = more than 12 hours, dark pink = more than 24 hours, red = more than 3 days, magenta = more
+than 14 days.</p>
+<p>Below the list: links to the main log file, to the file browser (data directory only) and to the
+PHP information page.</p>
+<h3 id="73-device-page">7.3 Device page</h3>
+<p><strong>Device Info</strong>: name, legacy name, last contact with the reason (AUTO = regular, MANUAL =
+triggered at the logger, RESET, ALARM), clock deviation of the logger, transmission counters,
+firmware version and date, device type, SIM (ICCID), free memory on the logger, mobile signal
+(dBm, network type, country), position if the logger reports one, last user command and its
+state. "Last Transmission OK" shows the last confirmation of a command; <code>[OK]</code> clears it.</p>
+<p><strong>Files on Device</strong>: the directory of the logger as seen at the last directory scan.
+<code>[GET DIR]</code> requests a new directory listing with the next contact. For each file: length, date
+and flags on the device, and the state of the local copy ("mirror") on the server: <code>UP-TO-DATE</code>
+means the server has the complete file.</p>
+<ul>
+<li><code>data.edt</code>: <code>[Open local]</code> raw text, <code>[View CSV]</code> converted to CSV in the browser, <code>[CSV(D)]</code>
+  download with German number format (comma, semicolon), <code>[CSV(Int)]</code> download with decimal
+  point, <code>[CSVIEW]</code> chart.</li>
+<li><code>iparam.lxp</code>, <code>sys_param.lxp</code>: <code>[Open local]</code> and <code>[Edit]</code> (section 7.4).</li>
+<li><code>[GET(remote)]</code> asks the logger to upload the complete file with the next contact (useful if
+  the mirror is incomplete). <code>[DEL(remote)]</code> deletes the file on the logger. Both are queued and
+  executed at the next contact; the queue entries can be removed again until then.</li>
+</ul>
+<p><strong>Cumulative data on server</strong>: <code>out_total/total.edt</code> contains everything the server ever received
+from this logger, in the order of arrival. The same view, download and chart links are available.
+Use this file for archiving and long-term evaluation; <code>data.edt</code> is only a mirror of the file on
+the logger and is replaced when the logger starts a new file.</p>
+<p><strong>Files to 'put'</strong>: files waiting to be transferred to the logger (section 7.4), with the number
+of attempts. <code>[Remove]</code> cancels the transfer.</p>
+<p><strong>Manage</strong>: links to the log files of the logger (contacts, connections, user commands), "Upload Files to Device's Filesystem" (any file, e.g. a prepared parameter file),
+"Send Server Command (Byte)" and "Send User Command (Text)" (commands defined by the logger
+firmware; use only as instructed by TerraTransfer), <code>[Enable DEBUG]</code> (stores every upload in raw
+form in <code>dbg/</code>; switch it off again after the diagnosis).</p>
+<h3 id="74-editing-parameter-files">7.4 Editing parameter files</h3>
+<p><code>[Edit]</code> next to <code>iparam.lxp</code> or <code>sys_param.lxp</code> opens a form with one input field per line and
+a short description of the known fields. "Submit" stores the file in the <code>put/</code> queue; the logger
+receives it with the next contact and applies it. <code>iparam.lxp</code> contains the measurement and
+transmission intervals, the channel definitions (unit, decimals, scaling, alarm limits) and the
+device name. <code>sys_param.lxp</code> contains the network and server settings (APN, server, path, key).
+Only change fields whose meaning you know; ask TerraTransfer in case of doubt.</p>
+<h3 id="75-charts-csview">7.5 Charts (CSVIEW)</h3>
+<p><code>[CSVIEW]</code> converts the data file to CSV and draws a chart (PHP extension <code>gd</code> required). The
+checkboxes switch channels on and off, the arrows scroll, the magnifier buttons zoom, "Export CSV"
+downloads the data shown. The temporary CSV files are stored in <code>&lt;S_DATA&gt;/stemp</code> and deleted
+automatically after two hours.</p>
+<h2 id="8-data-storage">8. Data storage</h2>
+<h3 id="81-directory-layout">8.1 Directory layout</h3>
+<pre><code>&lt;S_DATA&gt;/
+  .htaccess                       denies web access (Apache)
+  log/log.txt, _log_old.txt       main log of all contacts (rotated at 100 kB)
+  stemp/                          temporary CSV files of the chart viewer
+  &lt;MAC&gt;/                          one directory per logger, 16 hex digits
+    files/data.edt                mirror of the data file on the logger (EDT format)
+    files/data.edt.bak            previous version of the mirror
+    files/iparam.lxp              parameters of the logger
+    files/sys_param.lxp           system parameters (network, server, key)
+    out_total/total.edt           cumulative data: every received fragment is appended here
+    in_new/                       fragments of the current upload (moved to total.edt at once)
+    cmd/                          metadata of the device files (*.vmeta, *.fmeta), pending commands
+    get/ put/ del/                queues: files to fetch from / send to / delete on the logger
+    dbg/                          raw uploads while debug is enabled
+    device_info.dat               status written at every contact (key/value)
+    log.txt, _log_old.txt         log of this logger (rotated at 50 kB)
+    conn_log.txt                  mobile network information per contact
+    userio.txt                    user commands and replies
+    dapikey.dat                   device key as accepted for this logger
+    quota_days.dat                retention settings (informational)
+    user_info.dat                 legacy name set in the web interface
+    date0.dat                     time of the first contact
+</code></pre>
+<p>All files are plain text except the raw uploads in <code>dbg/</code>.</p>
+<h3 id="82-edt-data-format">8.2 EDT data format</h3>
+<p>EDT ("Easy Data") is a plain text format, UTF-8, one record per line:</p>
+<pre><code>!U 0:cm 1:°C 2:us/cm 90:V(Bat) 91:°C(int) 92:%rH(int)
+!1791806400 0:-43.917045 1:13.50 2:1.23 90:3.638 91:16.3 92:9.4
+!+900 0:-43.917045 1:13.50 2:1.26
+&lt;NT AUTO OK(637,51,0)&gt;
+</code></pre>
+<ul>
+<li><code>!U</code> – units of the channels; appears at the start and whenever the parameters change.</li>
+<li><code>!&lt;seconds&gt;</code> – measurement with an absolute UTC timestamp (Unix seconds) followed by
+  <code>channel:value</code> pairs.</li>
+<li><code>!+&lt;seconds&gt;</code> – measurement relative to the previous line.</li>
+<li>Channels 0–89 are measurements, 90–99 housekeeping values of the logger (battery voltage,
+  internal temperature and humidity). A line contains only the channels measured at that time.</li>
+<li><code>NoReply</code> instead of a value: the sensor did not answer. A value starting with <code>*</code> exceeded an
+  alarm limit.</li>
+<li>Lines starting with <code>&lt;</code> are events: <code>&lt;NT AUTO OK(…)&gt;</code> upload, <code>&lt;NT AUTO ERROR …&gt;</code> failed
+  upload, <code>&lt;RESET …&gt;</code> restart, <code>&lt;COOKIE …&gt;</code> time synchronisation, <code>&lt;NEW&gt;</code> start of a file.
+  After a restart the logger clock starts at zero until the next synchronisation; such lines
+  appear with dates in 1970.</li>
+<li>Lines starting with <code>$</code> are compressed records; the web interface decodes them.</li>
+</ul>
+<h3 id="83-csv-export">8.3 CSV export</h3>
+<p>The CSV views and downloads have the columns <code>NO</code> (line number in the EDT file), <code>TIME(UTC)</code>
+(<code>dd.mm.yy hh:mm:ss</code>) and one column per channel, named <code>unit(channel)</code>. Missing channels in a
+line are empty. <code>[CSV(D)]</code> uses semicolons and a decimal comma, <code>[CSV(Int)]</code> commas and a
+decimal point. The URL parameter <code>utc=&lt;seconds&gt;</code> shifts the time column, e.g. <code>utc=3600</code> for
+UTC+1.</p>
+<h2 id="9-operation">9. Operation</h2>
+<p><strong>Backup</strong>: back up the data directory regularly with any file backup tool. The files are
+written at every logger contact; a backup taken during a contact may end with an incomplete
+last line in <code>total.edt</code>, which the viewer shows as text; no other data is affected.</p>
+<p><strong>Disk space</strong>: <code>out_total/total.edt</code> grows without limit (about 2–3 MB per year and logger at
+15-minute intervals). To archive, move or truncate the file between two contacts of the logger;
+the next upload continues in a new file. <code>stemp/</code> and <code>dbg/</code> can be emptied at any time.</p>
+<p><strong>Monitoring</strong>: the device list shows the age of the last contact in colour. A logger that does
+not call for longer than twice its transmission interval should be checked (power, SIM, signal).
+The main log shows rejected contacts, e.g. a logger with a wrong key.</p>
+<p><strong>Logs</strong>: <code>&lt;S_DATA&gt;/log/log.txt</code> (all contacts, one line each, with the result and the run
+time), <code>&lt;MAC&gt;/log.txt</code> (contacts of one logger), <code>&lt;MAC&gt;/conn_log.txt</code> (network details),
+<code>&lt;MAC&gt;/userio.txt</code> (user commands and replies). The logs rotate
+automatically; the previous version is kept as <code>_…_old.txt</code>.</p>
+<p><strong>Time</strong>: keep the server clock synchronised (NTP). The loggers take the server time at every
+contact; a wrong server time produces wrong timestamps in the data.</p>
+<p><strong>Updates</strong>: to install a new version, replace the directories <code>sw/</code>, <code>legacy/</code> and <code>docs/</code>,
+keep <code>sw/conf/api_key.inc.php</code> and the data directory. Check the version notes for changed
+settings.</p>
+<p><strong>Moving to another server</strong>: install the software on the new server, copy the data directory
+and the configuration, then change the server address in the loggers (section 5) or redirect
+the old host name. Loggers keep their data until the next successful upload.</p>
+<h2 id="10-troubleshooting">10. Troubleshooting</h2>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Cause / what to do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Browser shows <code>ERROR: 'Server not configured (sw/conf/api_key.inc.php)'</code></td>
+<td>Placeholders <code>CHANGE_ME</code> still in the configuration.</td>
+</tr>
+<tr>
+<td>Logger does not appear, main log shows <code>(ERROR:'API Key')</code></td>
+<td>Device key in the logger differs from <code>D_API_KEY</code>.</td>
+</tr>
+<tr>
+<td>Logger does not appear, nothing in the main log</td>
+<td>Logger cannot reach the server: check host name/IP, path, port, firewall, APN/VPN; enable debug in the logger with TerraTransfer.</td>
+</tr>
+<tr>
+<td>Main log stays empty although loggers call, PHP warnings <code>mkdir</code>/<code>fopen</code> … <code>Permission denied</code> in the web server error log</td>
+<td>Data directory not writable for the web server user, or wrong <code>S_DATA</code> path.</td>
+</tr>
+<tr>
+<td>Device page shows <code>(no Directory Scan)</code></td>
+<td>No complete contact yet, or the first contacts failed. Use <code>[GET DIR]</code>.</td>
+</tr>
+<tr>
+<td>Mirror <code>data.edt</code> incomplete (<code>ERROR: Real-Local</code>)</td>
+<td>Use <code>[GET(remote)]</code> to fetch the whole file at the next contact.</td>
+</tr>
+<tr>
+<td><code>[CSVIEW]</code> shows <code>the PHP extension 'gd' is required</code></td>
+<td>Enable <code>gd</code> in <code>php.ini</code> and restart the web server.</td>
+</tr>
+<tr>
+<td>Login does not work although the password is right</td>
+<td>PHP sessions cannot be stored (<code>session.save_path</code> not writable) or cookies blocked.</td>
+</tr>
+<tr>
+<td>Timestamps in 1970</td>
+<td>Logger was restarted and has not received the server time yet; resolved at the next contact.</td>
+</tr>
+<tr>
+<td>Data directory reachable in the browser</td>
+<td>Apache: <code>AllowOverride</code> missing; nginx: add the <code>deny all</code> location. Better: move the directory outside the web root.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="11-security-notes">11. Security notes</h2>
+<ul>
+<li>The web interface has a single password with full rights. Restrict access to it (firewall,
+  VPN, or an additional authentication in the web server) when the server is reachable from
+  untrusted networks.</li>
+<li>Loggers send the device key with every contact. Use HTTPS or a private network (VPN, private
+  APN).</li>
+<li>Keep the data directory outside the web root or protected by the web server; it contains the
+  device key (<code>dapikey.dat</code>).</li>
+<li>Keep PHP and the web server updated.</li>
+</ul>
+</body></html>

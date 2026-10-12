@@ -108,11 +108,11 @@ echo "<meta http-equiv=\"refresh\" content=\"30; URL=$self\">";
 			if (!empty($devi['now'])) {
 				$dt = $now - $devi['now'];
 				$fage = secs2period($dt);
-				if ($dt > 259200) { // 14d
+				if ($dt > 1209600) { // 14d
 					$bakg = "magenta";
 				} else if ($dt > 259200) { // 3d
 					$bakg = "red";
-				} else if ($dt > 14400) { // 24h
+				} else if ($dt > 86400) { // 24h
 					$bakg = "deeppink";
 				} else if ($dt > 43200) { // 12h
 					$bakg = "lightpink";

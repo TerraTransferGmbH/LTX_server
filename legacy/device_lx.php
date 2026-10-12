@@ -1,7 +1,6 @@
 <?PHP // periodically refresh page (all 15 secs)
 error_reporting(E_ALL);
-include("../sw/conf/api_key.inc.php");
-@include("../sw/conf/config.inc.php");
+include_once(__DIR__ . "/_legacy.inc.php");
 include("mcclist.inc.php");
 
 session_start();
@@ -25,7 +24,7 @@ echo "<meta http-equiv=\"refresh\" content=\"15; URL=$self?$qs\"></head>";
 
 <?php
 // Legacy - device_lx.php Device View Script for LTX. Details: see docu
-// (C)joembedded@gmail.com  - jomebedded.de
+// (C) TerraTransfer GmbH
 // Version: 0.56 14.07.2025
 
 // todo: Kann sein, dass bei put/get/dir/del/-remove n File vergessen worden ist: pruefen!
@@ -42,16 +41,16 @@ function  secs2period($secs)
 
 // ----------------- M A I N -------------------
 $mtmain_t0 = microtime(true);         // for Benchmark 
-$mac = @$_REQUEST['s'];
+$mac = lg_mac(@$_REQUEST['s']);
 $now = time();
 $dbg = 0;	// Biser noch ohne Fkt.
 $dpath = S_DATA . "/$mac";
 
 if (!isset($dname)) {
-	$iparam_info =  @file(S_DATA . "/$dpath/files/iparam.lxp", FILE_IGNORE_NEW_LINES);
+	$iparam_info =  @file("$dpath/files/iparam.lxp", FILE_IGNORE_NEW_LINES);
 	$dname = @htmlspecialchars(@$iparam_info[5]);
 }
-echo "<title>LegacyLTX ";
+echo "<title>LTX Server ";
 if (strlen($dname)) echo "'$dname'";
 else echo "MAC:$mac";
 echo "</title></head><body>";
@@ -160,11 +159,6 @@ if (defined("DB_NAME")) {
 		echo " <a href=\"edit_quota.php?s=$mac\">[Edit Quota/Push ('quota_days.dat')]</a>";
 	}
 	echo "<br>";
-	if (defined("DAPIKEY_SERVER")) { // individual Key
-		$dapikey = @file_get_contents("$dpath/dapikey.dat"); // false oder KEY
-		if ($dapikey === false) $dapikey = "(<i>not set</i>)";
-		echo "DApiKey: '$dapikey'<br>";
-	}
 }
 
 if (!$demo) {
@@ -227,7 +221,7 @@ if (!$demo) {
 }
 
 
-if (!empty($devi['signal']) && strlen(G_API_KEY)) {
+if (!empty($devi['signal'])) {
 	$sig = $devi['signal'];
 	//echo "Signal: $sig ";
 	echo "Signal: ";
@@ -245,12 +239,11 @@ if (!empty($devi['signal']) && strlen(G_API_KEY)) {
 		echo " ($actn)";
 	}
 
-	$sqs = 'k=' . G_API_KEY . "&s=$mac&lnk=1&mcc=" . $asig['mcc'] . "&net=" . $asig['net'] . "&lac=" . $asig['lac'] . "&cid=" . $asig['cid'];
 
 	if ($asig['ta'] == 255) $radius = "";
 	else $radius = "ca. " . ($asig['ta'] * 500 + 500) . " mtr ";
 
-	echo " - Device located " . $radius . "arround <a href=\"" . CELLOC_SERVER_URL . "?$sqs\" target=\"_blank\" title=\"Estimated Position of last Cell Tower\">[Here]</a>";
+	if (strlen($radius)) echo " - Cell radius " . $radius;
 
 	$mcc = @$asig['mcc'];
 	if ($mcc) {
@@ -266,7 +259,7 @@ if (!empty($devi['pos'])) {
 	$lat = $posa[1];
 	$lng = $posa[2];
 	$page = secs2period($now - $devi['pos_ts']);
-	echo "Position: <a href='http://maps.google.com/maps?f=q&q=$lat,$lng&z=12' target='_blank'>[$pstr]</a> Age:$page<br>";
+	echo "Position: [" . htmlspecialchars($pstr) . "] Age:$page<br>";
 }
 
 if (!empty($devi['lut_cont'])) {
@@ -399,7 +392,6 @@ foreach ($flist as  $fmeta) {
 			echo "<a href=\"edt_view.php?s=$mac&f=$fname&o=135\" title=\"Download as CSV, Float Format: German\">[CSV(D)]</a> ";
 			echo "<a href=\"edt_view.php?s=$mac&f=$fname&o=131\" title=\"Download as CSV, Float Format: International\">[CSV(Int)]</a> ";
 			echo "<a href=\"csview/csview.php?s=$mac&f=$fname\" title=\"Graphical View Online\">[CSVIEW]</a> "; // Space wg. DELETE
-			echo "<a href=\"gps_view.php?s=$mac&f=$fname\" title=\"View as GPS (Map)\">[GPSVIEW]</a> ";
 		} else {
 			if (!$demo) {
 				echo "<a href=\"view.php?s=$mac&f=files/$fname\" title=\"View raw content of File\">[Open local]</a> ";
@@ -453,6 +445,19 @@ foreach ($phflist as $phfname) {
 	echo "<br>";
 }
 
+// Cumulative data file (minimal version): all uploaded data fragments, appended by the server
+$totf = "$dpath/out_total/total.edt";
+if (@file_exists($totf)) {
+	$ds = filesize($totf);
+	$fa = secs2period($now - filemtime($totf));
+	echo "<br><b>Cumulative data on server:</b> 'out_total/total.edt' ($ds Bytes, Age: $fa) ";
+	echo "<a href=\"view.php?s=$mac&f=out_total/total.edt\" title=\"View raw content of File\">[Open local]</a> ";
+	echo "<a href=\"edt_view.php?s=$mac&f=total.edt&d=total\" title=\"View as CSV (Text)\">[View CSV]</a> ";
+	echo "<a href=\"edt_view.php?s=$mac&f=total.edt&d=total&o=135\" title=\"Download as CSV, Float Format: German\">[CSV(D)]</a> ";
+	echo "<a href=\"edt_view.php?s=$mac&f=total.edt&d=total&o=131\" title=\"Download as CSV, Float Format: International\">[CSV(Int)]</a> ";
+	echo "<a href=\"csview/csview.php?s=$mac&f=total.edt&d=total\" title=\"Graphical View Online\">[CSVIEW]</a><br>";
+} else echo "<br><i>(No cumulative data file 'out_total/total.edt' yet)</i><br>";
+
 // Footer-info
 if (($delfilecmd > 0 || $getfilecmd > 0) && !$getdircmd) echo "<i>(INFO: Recommended to set both: DIR and GET/DEL FILE)</i><br>";
 if ($getfilecmd > 3) echo "<i>(INFO: Maybe 'notepad' on Device is not large enough for $getfilecmd Files)</i><br>";
@@ -492,10 +497,6 @@ if (sizeof($putlist) > 2) {
 if (!$demo) {
 
 	echo "</p><p><b>Manage:</b><br>";
-	if (strlen(KEY_API_GL) && strlen(KEY_SERVER_URL)) {
-		echo "<a target='_blank' href='gen_key_badge.php?s=$mac'>Generate Key Badge</a><br><br>";
-	}
-
 	$ds = @filesize("$dpath/log.txt");
 	if ($ds > 0) {
 		$dt = $now - filemtime("$dpath/log.txt");
@@ -569,8 +570,6 @@ if (!$demo) {
 
 	echo '<br>';
 	if (!$pasync) {
-		echo "<a href=\"fw_upload_form.php?s=$mac\">Upload new Firmware File</a><br>";
-		if (!empty($fwinfo['cookie'])) echo "<a href=\"unlink_lx.php?s=$mac&f=cmd/_firmware.sec.umeta\">Delete Firmware File</a><br>"; // Attention, not safe
 		echo "<a href=\"files_upload_form.php?s=$mac\">Upload Files to Device's Filesystem</a><br>";
 		echo "<a href=\"server_cmd_form.php?s=$mac\">Send Server Command (Byte)</a>";
 		if (@file_exists(S_DATA . "/$mac/cmd/server.cmd")) {

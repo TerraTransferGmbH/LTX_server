@@ -1,11 +1,11 @@
 <?PHP
 // -------------------------------------------------------------------
 // edit.php - Edit datafile (and write back)
-// 19.09.2023 joembedded.de
+// 19.09.2023 (C) TerraTransfer GmbH
 
 error_reporting(E_ALL);
-include("../sw/conf/api_key.inc.php");
-//include("../sw/lxu_loglib.php");
+include_once(__DIR__ . "/_legacy.inc.php");
+//include_once(__DIR__ . "/../sw/lxu_loglib.php");
 session_start();
 if (isset($_REQUEST['k'])) {
 	$api_key = is_string($_REQUEST['k']) ? $_REQUEST['k'] : '';
@@ -88,8 +88,8 @@ $p200_beschr = array(	// sys_param.lxp
 
 // ---------------------------- M A I N --------------
 // header('Content-Type: text/plain'); Output as HTML
-$mac = $_GET["s"];
-$fname = $_GET["f"];
+$mac = lg_mac(@$_GET["s"]);
+$fname = lg_fname(@$_GET["f"], 'files');
 $rfile = S_DATA . "/$mac/$fname";
 
 $beschr = array();

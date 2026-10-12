@@ -1,5 +1,5 @@
 <?php
-// FILE: lxu_loglib.php  - Version:04.12.2022
+// FILE: lxu_loglib.php  - Version:04.12.2022 (minimal file-mode version, (C) TerraTransfer GmbH)
 // include-module logfile only for LXU modules (path on 1.st level)!
 
 // ---- basic directory service ---
@@ -10,7 +10,7 @@ function check_dirs($wcmd = true)
 
 	$newdev = false;
 	// Data and LOG always required
-	if (!file_exists($sdata)) mkdir($sdata);  // MainDirectory
+	ensure_sdata($sdata);  // MainDirectory (protected against direct web access)
 	if (!file_exists($sdata . "/log")) mkdir($sdata . "/log");  // Logfiles
 	if(!isset($mac) || strlen($mac)!==16) return;	// No MAC
 	if($dapikey === false) return -1; // dir must exist
@@ -102,4 +102,62 @@ function add_logfile()
 		$line = gmdate("d.m.y H:i:s ", $now) . "UTC $xlog\n";
 		@file_put_contents($logpath . "log.txt", $line, FILE_APPEND | LOCK_EX);
 	}
+}
+
+// ---- Create the main data directory and deny direct web access to it (Apache) ----
+function ensure_sdata($sdata)
+{
+	if (!file_exists($sdata)) @mkdir($sdata, 0750, true);
+	if (!file_exists("$sdata/.htaccess")) {
+		@file_put_contents("$sdata/.htaccess", "<IfModule mod_authz_core.c>\nRequire all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\nDeny from all\n</IfModule>\n");
+	}
+}
+
+// ---- Minimal version: append the new upload fragments ('in_new/*.edt') to the device's
+// cumulative data file 'out_total/total.edt' (chronological order) and delete them.
+// Fragments of parameter files are ignored (the current versions are mirrored in 'files/').
+function legacy_trigger()
+{
+	global $mac, $xlog;
+	$dpath = S_DATA . "/$mac";
+	$inpath = "$dpath/in_new";
+	$flist = @scandir($inpath, SCANDIR_SORT_ASCENDING);	// Names start with the upload time
+	if (!$flist) return;
+	$outdir = "$dpath/out_total";
+	$added = 0;
+	$ignored = 0;
+	$bytes = 0;
+	$of = false;
+	foreach ($flist as $fname) {
+		if ($fname === '.' || $fname === '..') continue;
+		$ffile = "$inpath/$fname";
+		if (!is_file($ffile)) continue;
+		if (substr($fname, -4) !== '.edt') {	// Only EDT fragments (data, user commands)
+			$ignored++;
+			@unlink($ffile);
+			continue;
+		}
+		$cont = file_get_contents($ffile);
+		if ($cont === false) continue;
+		if ($of === false) {
+			if (!file_exists($outdir)) @mkdir($outdir);
+			$of = @fopen("$outdir/total.edt", 'ab');
+			if ($of === false) {
+				$xlog .= "(ERROR: can't open 'out_total/total.edt')";
+				return;
+			}
+			flock($of, LOCK_EX);
+		}
+		if (strlen($cont) && substr($cont, -1) !== "\n") $cont .= "\n";
+		fwrite($of, $cont);
+		$bytes += strlen($cont);
+		$added++;
+		@unlink($ffile);
+	}
+	if ($of !== false) {
+		fflush($of);
+		flock($of, LOCK_UN);
+		fclose($of);
+	}
+	if ($added || $ignored) $xlog .= "($added fragments/$bytes bytes -> 'out_total/total.edt', $ignored ignored)";
 }

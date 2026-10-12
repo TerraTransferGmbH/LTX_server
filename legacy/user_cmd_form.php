@@ -9,7 +9,7 @@
   <?php
   error_reporting(E_ALL);
   // ----------- M A I N ---------------
-  $mac = @$_GET['s'];           // exactly 16 Zeichen. api_key and mac identify device
+  $mac = lg_mac(@$_GET['s']);
   echo "<p><b><big> LTrax Set User Command </big></b><br></p>";
   echo "<p><a href=\"index.php\">LTrax Home</a><br>";
   echo "<a href=\"device_lx.php?s=$mac&show=a\">Device View $mac (All)</a><br></p>";

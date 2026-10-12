@@ -1,10 +1,10 @@
 <?PHP
 // -------------------------------------------------------------------
 // view.php - Show data (filtered and source directory hidden)
-// 04.07.2022 j.wickenh
+// 04.07.2022 (C) TerraTransfer GmbH
 
 error_reporting(E_ALL);
-include("../sw/conf/api_key.inc.php");
+include_once(__DIR__ . "/_legacy.inc.php");
 
 // ---------------------------- M A I N --------------
 session_start();
@@ -23,8 +23,9 @@ if (!$dev) {
 }
 
 
-$mac = $_GET["s"];
-$fname = $_GET["f"];
+$mac = @$_GET["s"];
+if ($mac !== 'log') $mac = lg_mac($mac);	// 'log' = main log directory
+$fname = lg_fname(@$_GET["f"], 'files|cmd|get|put|del|in_new|out_total|dbg');
 
 $rfile = S_DATA . "/$mac/$fname";
 
@@ -32,7 +33,7 @@ $ext = substr($fname, strrpos($fname, '.'));
 if (!strcasecmp($ext, ".php")) {
 	header('Content-Type: text/plain');
 	echo "<ERROR: Not allowed Format>\n"; // Filter illegal formats (Never display contents of PHP)
-} else if (strpos("$mac/$fname", "..") || !file_exists($rfile)) { // prevent upper dirs
+} else if (!file_exists($rfile)) {
 	header('Content-Type: text/plain');
 	echo "<ERROR: File not found: '$fname' (maybe too old?)>\n";
 } else {

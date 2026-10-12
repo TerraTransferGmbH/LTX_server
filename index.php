@@ -1,21 +1,12 @@
 <?php
-	/* Redirect to a different page in the current directory that was requested */
-	$host  = $_SERVER['HTTP_HOST'];
-	$uri   = $_SERVER['PHP_SELF'];
-	if(!isset($uri) || strlen($uri)<4) exit("ERROR: 'PHP_SELF' not set");
-	$extra = substr($uri,0,strrpos($uri,'/')).'/sw/login.php';
-	$nloc = "Location: //$host$extra";
-	header($nloc);	// PHP-Redirection
-	//exit;	(if redirection does not work, continue) // 
+	// index.php - redirect to the web interface (LTX server, minimal version)
+	// (C) TerraTransfer GmbH
+	$uri = $_SERVER['PHP_SELF'] ?? '/index.php';
+	$base = substr($uri, 0, strrpos($uri, '/'));
+	header("Location: $base/legacy/index.php");
 ?>
 <!DOCTYPE HTML>
 <html>
- <head>
-	<title>Login...</title><meta name=\"robots\" content=\"noindex,nofollow\">
- </head>
- <body>
-	 <?php echo "<a href='$extra'>Login: ' $extra; '...</a>"; ?>
- </body>
+ <head><title>LTX server</title><meta name="robots" content="noindex,nofollow"></head>
+ <body><?php echo "<a href='$base/legacy/index.php'>Web interface</a>"; ?></body>
 </html>
-
-

@@ -1,6 +1,6 @@
 <?php
 /* --------------CSPLOT.PHP --------------------------
-      CSV to IMAGE-Generator - (C) JoEmbedded.de
+      CSV to IMAGE-Generator - (C) TerraTransfer GmbH
 
       V2.20 02.11.2023
       ----
@@ -30,7 +30,7 @@
              Do NOT set if RAW data are requested via cmd (see below)
      ------------------------------------------------------- */
 
-include("../../sw/conf/api_key.inc.php");
+include_once(__DIR__ . "/../_legacy.inc.php");
 
 
 // Festgelegtes
@@ -56,8 +56,13 @@ $maxy = -1e20;
 $minx = 0;
 $maxx = 1e6;   // 1 Million Datensaetze max.
 
+if (!function_exists('imagecreate')) {
+  header('Content-Type: text/plain');
+  exit("ERROR: the PHP extension 'gd' is required for charts (csplot.php)");
+}
+
 // -- Ab hier Benutzerwerte, arbeiten nur im Unterverzeichnis stemp erlaubt ---
-if (@$_GET['file']) $fname = @$_GET['file']; // AUfrufen: file=xxx
+if (@$_GET['file']) $fname = LG_DATA . "/stemp/" . lg_tmpname($_GET['file']); // file=xxx (name in '<data>/stemp')
 if (@$_GET['maxy']) {
   $azoomy = 0;  // Nicht zoomen
   $maxy = $_GET['maxy'];
@@ -423,7 +428,7 @@ try {
 
   // TEST: Enable to show all Colors
   // for($i=0;$i<17;$i++) Imagefilledrectangle($bild,$cx0+$i*10,$cy1,$cx0+$i*10+6,$cy1+20,$col[$i]);
-  // ImageStringUp($bild,1,0,$sizey,"(C) Joembedded.de",$black);
+  // ImageStringUp($bild,1,0,$sizey,"(C) TerraTransfer GmbH",$black);
   header("Content-type: image/png");
   ImagePng($bild);
 } catch (Exception $e) {

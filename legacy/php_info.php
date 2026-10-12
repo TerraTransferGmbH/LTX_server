@@ -1,6 +1,6 @@
 <?php
 
-include("../sw/conf/api_key.inc.php");
+include_once(__DIR__ . "/_legacy.inc.php");
 session_start();
 if (isset($_REQUEST['k'])) {
 	$api_key = is_string($_REQUEST['k']) ? $_REQUEST['k'] : '';

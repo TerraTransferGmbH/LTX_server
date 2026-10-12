@@ -1,8 +1,8 @@
 <?php
 error_reporting(E_ALL);
 
-include("../sw/conf/api_key.inc.php");
-//include("../sw/lxu_loglib.php");
+include_once(__DIR__ . "/_legacy.inc.php");
+//include_once(__DIR__ . "/../sw/lxu_loglib.php");
 session_start();
 if (isset($_REQUEST['k'])) {
 	$api_key = is_string($_REQUEST['k']) ? $_REQUEST['k'] : '';
@@ -29,7 +29,7 @@ if (!strcmp($api_key, L_KEY)) {
 	}
 
 	// ----------- M A I N ---------------
-	$mac = @$_GET['s']; 					// exactly 16 Zeichen. api_key and mac identify device
+	$mac = lg_mac(@$_GET['s']);
 	echo "<p><b><big>Legacy LTrax Edit User Info Name </big></b><br></p>";
 	echo "<p><a href=\"index.php\">Legacy LTrax Home</a><br>";
 	echo "<a href=\"device_lx.php?s=$mac&show=a\">Device View $mac (All)</a><br></p>";

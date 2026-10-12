@@ -1,92 +1,113 @@
-# LTX Microcloud Server
+# LTX server – minimal version (file mode)
 
-**Server version**
+(C) TerraTransfer GmbH – www.terratransfer.de
 
-LTX can be installed in two modes:
+A small PHP web application that receives the data of TerraTransfer LTX data loggers via
+HTTP or HTTPS and stores it as text files, one directory per logger. A password-protected
+web page shows the status of the loggers, exports the data as CSV, draws simple charts and
+sends parameter files or commands to the loggers.
 
-- **LTX_Server**: with database support.
-- **LTX_Legacy**: without database support.
+No database, no Internet connection and no external services are needed. The server
+never contacts another host; no data leaves your network.
 
-In **LTX_Legacy** mode, all data is written to directories. Each device's new data is appended to `.../out_total/total.edt`. This file is plain text in `EDT` format and can become quite large over time. The input script `sw/ltu_trigger.php` adds the data.
+**Not included** (compared with the full LTX server): dashboard, user management, e-mail
+alarms, data push/export to other systems, automatic data retention, firmware updates via
+the server, map view.
 
-Note: using `CS_VIEW.PHP` for graphs requires PHP's `gdlib` extension to be enabled.
+## Requirements
 
-In **LTX_Server** mode, all new data is written to the database. The quota limit is configured in `./sw/conf/api_key.inc.php` via `DB_QUOTA` (default: `"90\n1000"`). For each new logger, a `quota_days.dat` file with two or three lines is created automatically:
+- Linux or Windows, a small VM or single-board computer is sufficient (e.g. 1 CPU core, 1 GB RAM).
+- Apache or nginx with PHP 7.4 or newer (8.x recommended), PHP extension `gd` (charts),
+  `session`, `ctype`, `iconv` (usually enabled by default). No `curl`, no mail, no cron.
+- A writable data directory, preferably outside the web root. Text storage, typically a few MB
+  per logger and year.
+- The loggers must reach the server via HTTP or HTTPS (port 80 or 443) inside your network
+  (LAN, VPN or private APN).
+- Correct system time (UTC); the server sends its time to the loggers.
 
-1. Number of days to keep, for example `90`.
-2. Maximum number of database lines per device, for example `1000`.
-3. Optional URL for PUSH notifications on new data. This is used only by `LTX_Server`.
+## Installation
 
-The input script `sw/ltu_trigger.php` automatically removes older data. For example, set `DB_QUOTA` to `"365\n100000"` to keep only the last 365 days or a maximum of 100,000 lines per device. `quota_days.dat` can be changed per logger at any time.
+1. Copy the directory tree to the web server, e.g. to `/var/www/html/ltx` (Linux) or
+   `C:\xampp\htdocs\ltx` (Windows/XAMPP). The web server user needs read access to the files.
+2. Edit `sw/conf/api_key.inc.php`:
+   - `S_DATA`: data directory. Default `../data_secret` (next to `sw/` and `legacy/`, i.e. inside
+     the web root; an `.htaccess` file that denies web access is created automatically for Apache).
+     Recommended: an absolute path outside the web root, e.g. `/var/lib/ltx-data` or `C:/ltx-data`.
+   - `L_KEY`: password of the web interface.
+   - `D_API_KEY`: device key, the value agreed with TerraTransfer and stored in the loggers.
+   The server refuses to work while the placeholders `CHANGE_ME` are still present.
+3. Create the data directory and make it writable for the web server user, e.g. on Linux:
+   `mkdir -p /var/lib/ltx-data && chown www-data:www-data /var/lib/ltx-data` (Debian/Ubuntu;
+   on RHEL the user is `apache`). On Windows/XAMPP no special rights are needed.
+4. Web server:
+   - Apache: PHP enabled, `AllowOverride All` (or at least `AuthConfig`) for the data directory
+     if it is inside the web root. Nothing else.
+   - nginx: standard PHP-FPM setup. If the data directory is inside the web root, deny access to it:
+     `location ^~ /ltx/data_secret/ { deny all; }`.
+   - PHP: `upload_max_filesize` and `post_max_size` of at least 2M (default); `session` enabled.
+5. Open `http://<server>/ltx/` in a browser. You are redirected to the web interface
+   (`legacy/index.php`). Log in with the password `L_KEY`. The list is empty until the first
+   logger has called the server.
 
-LTX Microcloud adapts the maximum upload size for files with Autosync, such as logger data, to the network speed. `2G/LTE-M` is faster than `LTE-NB`. Configure the two `define()` values `MAXM_2GM` and `MAXM_NB`; the defaults are `20k` and `5k` bytes.
+## Logger configuration
 
-For rare transmission intervals with high logging intervals, increase these limits to ensure that all data is transferred. SSL encryption over slow connections such as `LTE-NB` might work, but is not recommended.
+Each logger needs (set by TerraTransfer or via the parameter file `sys_param.lxp`):
 
-New in V2.23: by default, all devices use the same `D_API_KEY`. This is acceptable for small or closed systems. Larger systems can optionally use individual keys, attached to the MAC and checked via an external API.
+- server host name or IP address (e.g. `ltx.example.local` or `192.168.1.10`),
+- path `ltx/sw/lxu_v1.php` (adjust the first part if you installed into another directory),
+- the device key (`D_API_KEY`),
+- HTTP or HTTPS. For HTTPS the certificate must be accepted by the loggers.
 
-![LTX Gdraw tool](./docs_raw2edit/G-Draw.jpg "LTX Gdraw tool")
+The logger calls `http(s)://<server>/ltx/sw/lxu_v1.php?k=<key>&s=<MAC>` and uploads its new
+data. The reply contains the server time and pending commands.
 
-## Documentation
+## Directory layout of the data directory
 
-- Details: [Installation of LTX Database](./sw/docu/installation_LTX_database.md "Details")
-- Live demo: [LTX demo](https://joembedded.de/ltx/sw/login.php) (`demo` / `123456`)
+```
+<S_DATA>/log/log.txt               main log (all contacts), rotated at 100 kB
+<S_DATA>/<MAC>/                    one directory per logger (16 hex digits)
+    files/data.edt                 mirror of the data file on the logger (EDT format)
+    files/iparam.lxp, sys_param.lxp  current parameter files of the logger
+    out_total/total.edt            cumulative data: every uploaded fragment is appended here
+    in_new/                        uploaded fragments, moved to out_total/total.edt immediately
+    cmd/, get/, put/, del/         commands and file transfer queues (used by the web interface)
+    device_info.dat                status (counters, signal, memory, last contact)
+    log.txt, conn_log.txt          log of this logger / network info per contact
+    quota_days.dat, user_info.dat  settings of the web interface
+```
 
-More documentation is available in the media browser:
+`files/data.edt` is replaced when the logger starts a new data file. `out_total/total.edt`
+keeps everything the server ever received; it is plain text and can be archived or trimmed
+with normal tools (stop the web server or do it between contacts).
 
-- LTX Cloud Overview: [LTX Overview](./docs_raw2edit/LTX_Cloud_V1.pdf "LTX Overview")
-- LTX Alarme (only DE): [LTX Alarme (DE)](./docs_raw2edit/LTX_AlarmeDE_V1.pdf "LTX Alarme (DE)")
-- LTX API (only DE): [LTX PushPull-API (DE)](./docs_raw2edit/LTX_PushPull.pdf "LTX PushPull-API (DE)")
+## Data format (EDT)
 
----
+Plain text, UTF-8. `!U 0:cm 1:°C ...` lists the units of the channels; `!<seconds> 0:1.23 1:14.5`
+is a measurement with an absolute UTC time (Unix seconds); `!+900 ...` is relative to the
+previous line; channels 0–89 are measurements, 90–99 housekeeping values (battery, internal
+temperature and humidity); `NoReply` means the sensor did not answer; a value starting with
+`*` exceeded an alarm limit; lines starting with `<` are events (upload, reset, time sync).
 
-## Third-party Software
+The web interface converts EDT to CSV (`[View CSV]`, `[CSV(D)]` German decimal comma,
+`[CSV(Int)]` decimal point) and shows charts (`[CSVIEW]`), both for the device mirror and
+for the cumulative file.
 
-- PHP QR Code: <https://sourceforge.net/projects/phpqrcode> (LGPL)
-- jQuery: <https://jquery.org/license/> (MIT)
-- Font Awesome: <https://fontawesome.com/license/free> (MIT, SIL OFL, CC BY 4.0)
-- FileSaver: <https://github.com/eligrey/FileSaver.js/blob/master/LICENSE.md> (MIT)
+## Operation and maintenance
 
----
+- Back up the data directory regularly (plain files, any backup tool).
+- Disk space: watch `out_total/total.edt`; a logger with 15-minute intervals produces
+  roughly 2–3 MB per year.
+- Logs: `<S_DATA>/log/log.txt` shows every contact with the result; errors are marked
+  `(ERROR:...)`. Each logger has its own `log.txt`.
+- The `[Enable DEBUG]` link of a logger stores the raw uploads in `dbg/` for diagnosis;
+  disable it again afterwards.
+- Updating the software: replace the directories `sw/` and `legacy/` but keep
+  `sw/conf/api_key.inc.php` and the data directory.
 
-## Changelog
+## Security notes
 
-- V1.00 04.12.2020 Initial
-- V1.01 06.12.2020 Checked for PHP 8 compatibility
-- V1.02 08.12.2020 Docs added
-- V1.10 09.01.2021 More docs added
-- V1.50 08.12.2022 SWARM packet driver added
-- V1.52 20.01.2023 ASTROCAST packet driver added
-- V1.60 21.01.2023 Push URL first draft
-- V1.70 11.01.2023 PushPull pre-release in PHP
-- V1.71 06.02.2023 Database UTC
-- V1.72 11.02.2023 GPS_View.html cosmetics
-- V1.73 21.02.2023 Push/Pull `w_pcp.php` V1.05 released
-- V1.74 28.03.2023 Fixed `undefined` in `gps_view.js`
-- V1.75 20.04.2023 `w_pcp.php` V1.07
-- V1.76 06.06.2023 Access Legacy for admin users
-- V1.77 28.06.2023 Added `sw/js/xtract_demo.html`: demo to access BLE_API data in IndexDB
-- V1.78 15.08.2023 Device timeouts in `service.php`
-- V1.79 05.10.2023 Added `CommandConfig` as new parameter in `iparam.lxp`
-- V2.00 15.10.2023 Direct FTP/FTPSSL push via `CommandConfig`
-- V2.01 18.10.2023 Cosmetics and FTP push (only `LTX_Server`)
-- V2.10 19.10.2023 Decoding of compressed lines, starting with `$` + Base64, added
-- V2.20 02.11.2023 Legacy CSView UTF-8 cosmetics and removed database fields `token`, `mail`, `cond..1-3` (see `...sql_docu.txt`)
-- V2.21 04.11.2023 Added network details (2G/4G/...)
-- V2.22 05.11.2023 Max. upload limit depending on network; set `MAXM_xx` in `api_key.inc.php`
-- V2.23 25.11.2023 If `DAPIKEY_SERVER` is defined: individual external `D_API_KEY` check for each new device (only once)
-- V2.24 28.11.2023 Additional FTP export formats (`sw/vpnf/ipush.php`)
-- V2.25 11.12.2023 Added `quotaget`/`quotachange` in `sw/php/w_rad.php`
-- V2.26 20.01.2024 Added onboarding/remove commands in `sw/php/w_rad.php` (more commands: todo; see `LTX_PushPull.pdf`, V1.11)
-- V2.27 22.01.2024 Optimised onboarding/remove commands
-- V2.28 14.03.2024 Error fix (`lxu_trigger.php`)
-- V2.29 06.04.2024 Cosmetics
-- V2.30 17.04.2024 Cosmetics
-- V2.31 13.05.2024 Drivers for SWARM (product shut down) and ASTROCAST removed
-- V2.32 24.05.2024 Added drivers from ORBCOMM IGWS2 (INMARSAT)
-- V2.33 09.09.2024 Selectable sec/min/hr and started internationalisation in UI
-- V2.50 11.10.2024 Added German/English translations for `intern_main.html`
-- V2.51 18.11.2024 Added EcoWitt/Wunderground data upload for weather stations
-- V2.52 05.12.2024 Added optional `MXGET_MEM` (extends `MAXM_xx` from V2.22)
-- V2.53 25.06.2025 Added LoRaWAN support for ChirpStack V4 and TTN V3 (`lxu_ltxlora_v1.php`)
-- V2.54	20.08.2026 Protected new Users/MACs for 90d (in service)
+- Use HTTPS or a private network for the loggers; the device key is sent with every contact.
+- Keep the data directory outside the web root or protected by the web server.
+- The web interface has one password (`L_KEY`) with full rights; restrict access to it
+  (firewall, VPN or an additional web server authentication) if the server is reachable
+  from untrusted networks.

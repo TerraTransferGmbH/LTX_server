@@ -1,11 +1,10 @@
 <?php
-// lxu_v1.php Server-Communication Script for LTrax. Details: see docu
-// (C) 05.12.2024 - V1.44 joembedded@gmail.com  - JoEmbedded.de
+// lxu_v1.php - LTX device endpoint (server communication script), minimal file-mode version
+// (C) TerraTransfer GmbH - V1.44m
 // Evtl. "schnelle Hilfe": error_reporting (E_ALL & ~E_DEPRECATED);
 
 error_reporting(E_ALL);
 include_once("conf/api_key.inc.php");
-include_once("conf/config.inc.php");
 include_once("lxu_loglib.php");
 
 // ----- reads u32 from $data  BE -----   32Bit.u from String
@@ -38,23 +37,6 @@ function show_str($rem, $str)
 	echo "\n";
 }
 
-// ---------------- Trigger: Inline call to lxu_trigger.php -------------------------
-function trigger($reason, $vflag)
-{
-	global $mac;
-	try {
-		$tpdo = new PDO("mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8", DB_USER, DB_PASSWORD);
-		$tpdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-		$tpdo->prepare("INSERT INTO trigger_queue (mac, reason, vpnf) VALUES (?, ?, ?)")
-			->execute([$mac, intval($reason), $vflag ? 1 : 0]);
-	} catch (Exception $e) {
-		// Queue unavailable — fall back to inline trigger
-		define('LXU_TRIGGER_INLINE', true);
-		include_once("lxu_trigger.php");
-		run_trigger($mac, $reason, $vflag ? '' : null);
-	}
-}
-
 // -------------------------------------- M A I N --------------------------------
 header('Content-Type: text/plain');
 
@@ -80,11 +62,15 @@ $xlog = "(lxu_v1)";
 if (@file_exists("$dpath/cmd/dbg.cmd")) {
 	if (!$dbg) $dbg = 1;
 }
+if (D_API_KEY === "CHANGE_ME" || L_KEY === "CHANGE_ME") exit_error("Server not configured (sw/conf/api_key.inc.php)");
 if (!isset($api_key)) exit_error("API Key"); // Required
-$dapikey = @file_get_contents("$dpath/dapikey.dat"); // false oder KEY
-if ($dapikey === false || strcmp($api_key, $dapikey)) { //
-	include("conf/check_dapikey.inc.php"); // only on demand: check extern, opt. set daksave
-	if ($dapikey === false || strcmp($api_key, $dapikey)) exit_error("API Key");
+$dapikey = @file_get_contents("$dpath/dapikey.dat"); // false or KEY
+if ($dapikey === false || strcmp($api_key, $dapikey)) {
+	// Minimal version: one common device key for all loggers (D_API_KEY)
+	if (!is_string($api_key) || !hash_equals(D_API_KEY, $api_key)) exit_error("API Key");
+	$xlog .= "(Use Default D_API_KEY)";
+	$dapikey = D_API_KEY;
+	$daksave = true;	// Save after creating dirs
 }
 
 if (empty($fname)) exit_error("No Data");
@@ -853,6 +839,8 @@ if (function_exists('fastcgi_finish_request')) {
 	fastcgi_finish_request();
 }
 
-if (!$expmore) {	// Finished! Start inline trigger
-	trigger(@$devi['reason'], isset($vpnf));	// If trigger fails: New entry in logfile
+if (!$expmore) {	// Finished! Append the new data fragments to the cumulative file (no database)
+	$xlog = "(trigger)";
+	legacy_trigger();
+	add_logfile();
 }

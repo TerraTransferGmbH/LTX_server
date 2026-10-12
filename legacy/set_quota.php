@@ -1,11 +1,11 @@
 <?php
 // Set quota name for a Logger
 
-// V1.1 21.1.2023(C) JoEmbedded 
+// V1.1 21.1.2023(C) TerraTransfer GmbH 
 error_reporting(E_ALL);
 
-include("../sw/conf/api_key.inc.php");
-include("../sw/lxu_loglib.php");
+include_once(__DIR__ . "/_legacy.inc.php");
+include_once(__DIR__ . "/../sw/lxu_loglib.php");
 session_start();
 if (isset($_REQUEST['k'])) {
 	$api_key = is_string($_REQUEST['k']) ? $_REQUEST['k'] : '';
@@ -26,7 +26,7 @@ if (!$dev) {
 header('Content-Type: text/plain');
 
 $dbg = 0;	// Currently not used
-$mac = @$_GET['s']; // 16 Chars, Uppercase
+$mac = lg_mac(@$_GET['s']);
 $now = time(); // Sec ab 1.1.1970, GMT
 
 $udays = @$_POST['udays'];

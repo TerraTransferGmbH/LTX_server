@@ -4,7 +4,7 @@
 // 02.08.2025
 
 error_reporting(E_ALL);
-include("../sw/conf/api_key.inc.php");
+include_once(__DIR__ . "/_legacy.inc.php");
 include("mcclist.inc.php");
 
 // ---------------------------- M A I N --------------
@@ -25,8 +25,8 @@ if (!$dev) {
 
 
 
-$mac = $_GET["s"];
-$fname = $_GET["f"];
+$mac = lg_mac(@$_GET["s"]);
+$fname = lg_fname(@$_GET["f"]);
 
 $rfile = S_DATA . "/$mac/$fname";
 
@@ -34,7 +34,7 @@ $ext = substr($fname, strpos($fname, '.'));
 if (strcasecmp($ext, ".txt")) {
 	header('Content-Type: text/plain');
 	echo "<ERROR: Not allowed Format>\n"; // Filter illegal formats (Never display contents of PHP)
-} else if (strpos("$mac/$fname", "..") || !file_exists($rfile)) { // prevent upper dirs
+} else if (!file_exists($rfile)) {
 	header('Content-Type: text/plain');
 	echo "<ERROR: File not found: '$fname' (maybe too old?)>\n";
 } else {
@@ -79,8 +79,7 @@ if (strcasecmp($ext, ".txt")) {
 		$country=@$mcca[$mcc];
 		if(!$country) $country=$mcca[intval($mcc/100)]; // Fallback
 
-		$sqs = 'k='.G_API_KEY."&s=$mac&lnk=1&mcc=$mcc&net=$net&lac=$lac&cid=$cid"; // Link
-		echo "<tr> <td>$i: $mcc-$net-$lac-$cid ($actn) (<i>$country</i>) </td> <td> $ccnt </td> <td><a target='_blank' href=\"" . CELLOC_SERVER_URL . "?$sqs\">[Here]</a></td> </tr>";
+		echo "<tr> <td>$i: $mcc-$net-$lac-$cid ($actn) (<i>$country</i>) </td> <td> $ccnt </td> </tr>";
 		$i++;
 	}
 	echo "</table>";
@@ -123,17 +122,9 @@ if (strcasecmp($ext, ".txt")) {
 			if($ta==255) $tar="";
 			else $tar= " ca. ".($ta*500+500)."mtr" ;	// in m
 
-			$sqs = 'k='.G_API_KEY."&s=$mac&lnk=1&mcc=$mcc&net=$net&lac=$lac&cid=$cid"; // Link
-	
-
-			echo " &nbsp; Cell($ccnt):" . $tar . " arround <a href=\"" . CELLOC_SERVER_URL . "?$sqs\">[Here]</a>";
+			echo " &nbsp; Cell($ccnt):" . $tar;
 
 
-		/* Ask DB for each line is SLOW 
-		$sqs = 'k='.G_API_KEY."&s=$mac&lnk=0&mcc=$mcc&net=$net&lac=$lac&cid=$cid"; // No Link
-		$xresp=file_get_contents(CELLOC_SERVER_URL . "?$sqs");
-		echo $xresp;
-		*/		
 			$cpcache[$ha]=-$ccnt;
 			$ccnt++;
 		}else{

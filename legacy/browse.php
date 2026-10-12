@@ -2,12 +2,12 @@
 // A small file browser for a given subdirectory for the
 // incomming LTX data...
 // Show Header in RED for filebrowser
-// (C) JoEmbedded.de
+// (C) TerraTransfer GmbH
 //
 // V1.10: Tested PHP8
 error_reporting(E_ALL);
 
-include("../sw/conf/api_key.inc.php");
+include_once(__DIR__ . "/_legacy.inc.php");
 session_start();
 if (isset($_REQUEST['k'])) {
 	$api_key = is_string($_REQUEST['k']) ? $_REQUEST['k'] : '';
@@ -42,31 +42,25 @@ if (!strcmp($api_key, L_KEY)) {
 
 	//---- MAIN -----
 	$now = time();
+	$base = @realpath(LG_DATA);
 	$dir = @$_GET['dir'];
-
-	// echo "MIN: $minpath<br>";
-	if (!$dir) $dir = S_DATA; 	// Default Dir is DATA
-
+	if (!is_string($dir) || !strlen($dir)) $dir = $base; 	// Default Dir is DATA
+	$actpath = @realpath($dir);
 	$anz = 0;
-	echo "<p><b><big><font color=\"red\">Legacy LTX Browser V1.10 - Directory '$dir'</font></big></b><br></p>";
+	echo "<p><b><big><font color=\"red\">Legacy LTX Browser V1.10 - Directory '" . htmlspecialchars((string)$actpath) . "'</font></big></b><br></p>";
 	echo "<p><a href=\"index.php\">Legacy LTX Home</a><br></p>";
 
-	// --- Test if in allowed range ---
-	$minpath = substr(__DIR__, 0, strrpos(__DIR__, '/'));	// __DIR__ global Instllationi path
-	$actpath = @realpath($dir);
-	// echo "minpath: '$minpath', actpath: '$actpath'<br>";
-	if (strncmp($actpath, $minpath, strlen($minpath))) {
+	// --- Only the data directory and its sub directories ---
+	if (!$base || !$actpath || strncmp($actpath . DIRECTORY_SEPARATOR, $base . DIRECTORY_SEPARATOR, strlen($base) + 1)) {
 		echo "<p><b>Invalid path!</b></p>";
 		$dir = "";	// -> Gen. Error: Directory not found
-	}
-	// --- Test End ---
-	if (strcmp($dir, S_DATA)) {	// Normally not higher than data...
-		$p = strrpos($dir, '/');
-		if ($p > 1) {
-			$up = substr($dir, 0, $p);
-			echo "<p><a href=\"browse.php?dir=$up\">[ . . ]</a><br></p>";
+	} else {
+		$dir = $actpath;
+		if (strcmp($dir, $base)) {	// Not higher than data...
+			echo "<p><a href=\"browse.php?dir=" . urlencode(dirname($dir)) . "\">[ . . ]</a><br></p>";
 		}
-	} // else don't show up
+	}
+	$rel = ($dir !== "") ? str_replace('\\', '/', substr($dir, strlen($base) + 1)) : "";	// relative to the data directory
 
 	if (file_exists($dir)) {
 		$list = scandir($dir);
@@ -75,7 +69,7 @@ if (!strcmp($api_key, L_KEY)) {
 		foreach ($list as $file) {
 			if ($file == '.' || $file == '..') continue;
 			if (is_dir("$dir/$file")) {
-				echo "<a href=\"browse.php?dir=$dir/$file\">[$file]</a><br>";
+				echo "<a href=\"browse.php?dir=" . urlencode("$dir/$file") . "\">[$file]</a><br>";
 				$dircnt++;
 			}
 		}
@@ -90,7 +84,13 @@ if (!strcmp($api_key, L_KEY)) {
 			$ds = filesize("$dir/$file");
 			$dstot += $ds;
 			$fa = secs2period($now - filemtime("$dir/$file"));
-			echo "<a href=\"$dir/$file\">$file</a> ($ds Bytes, Age: $fa)<br>";
+			$link = "";	// Files are shown via view.php (the data directory is not reachable by the web server)
+			if ($rel === 'log') $link = "view.php?s=log&f=" . urlencode($file);
+			else if (preg_match('/^([0-9A-F]{16})(?:\/(files|cmd|get|put|del|in_new|out_total|dbg))?$/', $rel, $m)) {
+				$link = "view.php?s=$m[1]&f=" . urlencode((isset($m[2]) ? "$m[2]/" : "") . $file);
+			}
+			if ($link) echo "<a href=\"$link\">$file</a> ($ds Bytes, Age: $fa)<br>";
+			else echo "$file ($ds Bytes, Age: $fa)<br>";
 			$anz++;
 		}
 		if ($anz) echo "($anz Files, total: $dstot Bytes)<br>";

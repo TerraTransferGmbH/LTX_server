@@ -5,14 +5,14 @@
 	* store logged data. Read the docu!
 	*
     * Version: V2.01 - 14.12.2024
-	* (C) JoEmbedded.de
+	* (C) TerraTransfer GmbH
     * ---------------------------------------------------------------------- */
 
 error_reporting(E_ALL);
-include("../sw/conf/api_key.inc.php");
-include("../sw/lxu_loglib.php");
+include_once(__DIR__ . "/_legacy.inc.php");
+include_once(__DIR__ . "/../sw/lxu_loglib.php");
 
-session_start();
+if (session_status() !== PHP_SESSION_ACTIVE) session_start();
 if (isset($_REQUEST['k'])) {
 	$api_key = is_string($_REQUEST['k']) ? $_REQUEST['k'] : '';
 	if (hash_equals(L_KEY, $api_key)) $_SESSION['key'] = L_KEY;
@@ -127,12 +127,13 @@ $xerr = "";	// After-Line Error Text
 $dbg = 0;
 $mtmain_t0 = microtime(true);         // for Benchmark 
 
-$mac = @$_GET["s"];
+$mac = lg_mac(@$_GET["s"]);
 if (!isset($mac) || strlen($mac) != 16) {
 	exit_error("MAC Len");
 }
-$fname = @$_GET["f"];
-$utc_offset = @$_GET["utc"]; // Or 0
+$fname = lg_fname(@$_GET["f"]);
+$dsub = (@$_GET["d"] === 'total') ? 'out_total' : 'files';	// files = mirror of the device, out_total = cumulative file
+$utc_offset = intval(@$_GET["utc"]); // Or 0
 
 // some option bits: 
 // 1: No Alarms ('*', but last <ALARM> Token, if found)
@@ -152,24 +153,25 @@ define("GERMAN_FLOAT", 32);
 define("UNIX_TIMESTAMP", 64);
 define("DOWNLOAD_CSV", 128);
 
-$opt = @$_GET["o"];
+$opt = intval(@$_GET["o"]);
 
-if ($opt & DOWNLOAD_CSV) {
-	header('Content-type: text/csv');
-	header("Content-Disposition: attachment; filename=$fname.csv"); // RFC2183: Querry Open/Save
-} else header('Content-Type: text/plain');
-
+if (!defined('EDT_VIEW_EMBEDDED')) {	// Not when included by csview
+	if ($opt & DOWNLOAD_CSV) {
+		header('Content-type: text/csv');
+		header("Content-Disposition: attachment; filename=$fname.csv"); // RFC2183: Querry Open/Save
+	} else header('Content-Type: text/plain');
+}
 echo "\xEF\xBB\xBF";	// UTF8-Byte-Order-Mark
 
 if ($dbg) {
 	echo "<DEBUG>\n";
 }
 
-if (!@file_exists(S_DATA . "/$mac")) exit_error("Error (Directory/MAC not found)");
+if (!@file_exists(LG_DATA . "/$mac")) exit_error("Error (Directory/MAC not found)");
 //if(check_dirs()) exit_error("Error (Directory/MAC not found)");
 if (empty($fname)) exit_error("No Data (Need File)");
 
-$rfile = S_DATA . "/$mac/files/$fname";
+$rfile = LG_DATA . "/$mac/$dsub/$fname";
 if (!file_exists($rfile)) {
 	exit_error("ERROR: File not found: '$rfile' (maybe too old?)");
 }

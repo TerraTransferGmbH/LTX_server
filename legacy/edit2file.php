@@ -1,10 +1,10 @@
 <?php
 // Convert HTML to File and upload
-// V1.1 (C) JoEmbedded 
+// V1.1 (C) TerraTransfer GmbH 
 
 error_reporting(E_ALL);
-include("../sw/conf/api_key.inc.php");
-include("../sw/lxu_loglib.php");
+include_once(__DIR__ . "/_legacy.inc.php");
+include_once(__DIR__ . "/../sw/lxu_loglib.php");
 session_start();
 if (isset($_REQUEST['k'])) {
 	$api_key = is_string($_REQUEST['k']) ? $_REQUEST['k'] : '';
@@ -40,8 +40,8 @@ function show_str($rem, $str)
 header('Content-Type: text/plain');
 
 $dbg = 0;	// Currently not used
-$mac = @$_POST['mac']; // 16 Chars, Uppercase
-$freal_name = @$_POST['fname'];
+$mac = lg_mac(@$_POST['mac']);
+$freal_name = lg_fname(@$_POST['fname']);
 $lines = @$_POST['lines'];
 
 $now = time(); // Sec ab 1.1.1970, GMT

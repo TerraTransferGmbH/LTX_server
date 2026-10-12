@@ -1,6 +1,6 @@
 <?PHP
 /* --------------CSVIEW.PHP --------------------------
-CSV - Online Viewer - (C) Joembedded.de
+CSV - Online Viewer - (C) TerraTransfer GmbH
 V2.20 02.11.2023
 ----
   Tested PHP8 and VS with intellisense
@@ -19,7 +19,7 @@ V2.20 02.11.2023
           single channel images)
 ------------------------------------------------------- */
 error_reporting(E_ALL);
-include("../../sw/conf/api_key.inc.php");
+include_once(__DIR__ . "/../_legacy.inc.php");
 
 //------------- Functions -----------------
 
@@ -48,15 +48,15 @@ function read_csv()
   $miny = +1000000;
   $maxy = -1000000;
 
-  $dpath = '../' . S_DATA . "/stemp/$fname";
+  $dpath = $fname;
 
   $inf = fopen($dpath, "r");
   if (!$inf) error_message("Can't open File '$fname'");
   if (fgets($inf, 4 /*OK, len-1*/) !== "\xef\xbb\xbf")  rewind($inf); // Skip BOM
 
-  $title = $fname;
+  $title = basename($fname);
 
-  while ($line = fgetcsv($inf, 1000)) { // Achtung: Addiert BOM-Header (UTF-8)
+  while ($line = fgetcsv($inf, 1000, ",", "\"", "\\")) { // Achtung: Addiert BOM-Header (UTF-8)
     if ($line[0][0] == 'N') {
       $units = $line;
       $units[1] = "Events";       // Umnennen
@@ -95,8 +95,8 @@ function read_csv()
 /* Remove old CSV-files from stemp */
 function remove_old_csv()
 {
-  $dpath = '../' . S_DATA . "/stemp";
-  if (!file_exists('../' . S_DATA . "/stemp")) mkdir('../' . S_DATA . "/stemp");
+  $dpath = LG_DATA . "/stemp";
+  if (!file_exists($dpath)) mkdir($dpath);
 
 
 
@@ -128,26 +128,29 @@ if (@$_GET['sizex']) $sizex = $_GET['sizex']; // Darstellungsgroesse
 if (@$_GET['sizey']) $sizey = $_GET['sizey'];
 if (@$_GET['xl']) $xl = $_GET['xl'];
 
-$mac = @$_GET['s'];  // = ID of LTraX (required)
-$fname = @$_GET['f'];  // Filename (required)
+$mac = lg_mac(@$_GET['s']);  // = ID of the logger (required)
+$fname = lg_fname(@$_GET['f']);  // Filename (required)
+$dsub = (@$_GET['d'] === 'total') ? 'total' : '';  // '' = device mirror (files/), 'total' = cumulative file
 
 remove_old_csv();
 if (empty($mac)) error_message("MAC not set");
 
-// Remote File erzeugen lassen
+// Convert the EDT file to CSV: embedded call of edt_view.php (no HTTP request to the own server)
 session_start();
 $skey = @$_SESSION['key'];
-$self = "http://" . $_SERVER['HTTP_HOST'] . $_SERVER['PHP_SELF'];
-$calls = substr($self, 0, strrpos($self, '/'));  // Muss 2 Levels hoch gehen
-$call = substr($calls, 0, strrpos($calls, '/'));
-$url = "$call/edt_view.php?s=$mac&f=$fname&o=2&k=$skey";
-$info = file_get_contents($url); // Remove Blabla
+if (!is_string($skey) || !hash_equals(L_KEY, $skey)) error_message("Access denied");
+define('EDT_VIEW_EMBEDDED', true);
+$_GET = array('s' => $mac, 'f' => $fname, 'o' => 2, 'd' => $dsub);
+ob_start();
+include(__DIR__ . "/../edt_view.php");
+$info = ob_get_clean();
 if (strlen($info) < 10) {
   echo "*ERROR: Not DATA*\n";
   exit();
 }
 
-$fname = '../' . S_DATA . "/stemp/t" . rand(10000, 99999) . time() . ".csv"; // unique_string
+$tname = "t" . rand(10000, 99999) . time() . ".csv"; // unique name in '<data>/stemp'
+$fname = LG_DATA . "/stemp/$tname";
 file_put_contents($fname, $info); // Might add UTF8-BOM */
 
 /*
@@ -187,7 +190,7 @@ $anz = read_csv();
 <title><?PHP echo $title; ?> - CSView Online</title>
 
 <script type="text/javascript">
-  // Script (C) JoEmbedded.de
+  // Script
 
   // --- OPTIONAL DYNAMIC Data START ---
   var sizex = <?PHP echo $sizex; ?>; // Size Graphik (Default is 500x400)
@@ -196,7 +199,7 @@ $anz = read_csv();
   var hideleg = <?PHP echo $xl; ?>; // Set to 1 to hide legend
 
   // --- REQUIRED DYNAMIC Data START ---
-  var file = '<?PHP echo $fname; ?>'; // Name of CSV-File
+  var file = '<?PHP echo $tname; ?>'; // Name of CSV-File (in '<data>/stemp')
   var channels = new Array( // Enthaelt implizit Number of Channels
     <?PHP
     $au = count($units);

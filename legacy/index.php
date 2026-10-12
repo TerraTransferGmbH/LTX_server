@@ -1,9 +1,9 @@
 <?php
-// Devloper-Login via S_API_KEY
+// Web interface: device list and login (LTX server, minimal version)
 error_reporting(E_ALL);
 
-include("../sw/conf/api_key.inc.php");
-include("../sw/lxu_loglib.php");
+include_once(__DIR__ . "/_legacy.inc.php");
+include_once(__DIR__ . "/../sw/lxu_loglib.php");
 include("mcclist.inc.php");
 
 session_start();
@@ -23,8 +23,8 @@ if (!strcmp($api_key, L_KEY)) {
 }
 echo "<!DOCTYPE HTML><html><head>";
 
-if ($dev) $title = "LegacyLTX Develop-Login V0.56";
-else $title = "LegacyLTX Home and Guest/Demo-Login V0.56";
+if ($dev) $title = "LTX Server - Administration V0.56";
+else $title = "LTX Server - Home and Guest/Demo-Login V0.56";
 
 $self = $_SERVER['PHP_SELF']; // Periodisch alle 30 Sekunden  auffrischen
 echo "<meta http-equiv=\"refresh\" content=\"30; URL=$self\">";
@@ -42,7 +42,7 @@ echo "<meta http-equiv=\"refresh\" content=\"30; URL=$self\">";
 
 	// dev.php DevPortal Script for LTrax. Details: see docu
 	// Only for Low-Level Developer Access!!!
-	// (C)joembedded@gmail.com  - jomebedded.de
+	// (C) TerraTransfer GmbH
 	// V0.56 / 20.01.2024
 	// todo: --- maybe LOCK makes sense for several files
 	if (!isset($self) || strlen($self) < 4) echo "WARNING: 'PHP_SELF' not set<br>";
@@ -71,7 +71,7 @@ echo "<meta http-equiv=\"refresh\" content=\"30; URL=$self\">";
 
 	// Evtl. gen Dirs
 	if (!file_exists(S_DATA)) {
-		mkdir(S_DATA);  // MainDirectory
+		ensure_sdata(S_DATA);  // MainDirectory (protected against direct web access)
 		$xlog = "(Generated Device Directory '$dir/')";
 	}
 	if (!file_exists(S_DATA . "/log")) {
@@ -90,7 +90,7 @@ echo "<meta http-equiv=\"refresh\" content=\"30; URL=$self\">";
 	foreach ($list as $file) {
 		if ($file == '.' || $file == '..') continue;
 		if (!ctype_xdigit($file)) continue;
-		if (!is_dir("./$dir/$file")) continue;	// Should not be, but..
+		if (!is_dir("$dir/$file")) continue;	// Should not be, but..
 		if (!$dev && !@file_exists(S_DATA . "/$file/demo.cmd")) continue;
 
 		$devi = array();
@@ -199,10 +199,6 @@ echo "<meta http-equiv=\"refresh\" content=\"30; URL=$self\">";
 		if ($ds > 0) {
 			$fa = secs2period($now - filemtime("$dpath/_pcplog_old.txt"));
 			echo "<a href=\"view.php?s=log&f=_pcplog_old.txt\">Old Main Push-Pull-Logfile '_pcplog_old.txt'</a> ($ds Bytes, Age: $fa)<br>";
-		}
-
-		if (@file_exists("../sw/service/index.php")) {
-			echo "<br><a href=\"../sw/service/index.php\" target='_blank'>Service...</a>";
 		}
 
 		echo "<br><a href=\"browse.php\" target='_blank'>Browse LTrax Files (Main Directory)</a> ";

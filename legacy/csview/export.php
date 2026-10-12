@@ -4,14 +4,14 @@
      // Submodule for CSVIEW
      // -------------------------------------------------------
     error_reporting(E_ALL);
-	include("../api_key.php");
+	include_once(__DIR__ . "/../_legacy.inc.php");
 
      // Name der Datendatei
      $fname="(unknown).xxx";
 
      if(@$_GET['file']){
-       $fname=$_GET['file']; // AUfrufen: file=xxx
-    $srcf="../".S_DATA."/stemp/$fname";
+       $fname=lg_tmpname($_GET['file']); // file=xxx (name in '<data>/stemp')
+       $srcf=LG_DATA."/stemp/$fname";
        if (!file_exists($srcf)){
          $e="File '$fname' not found";
        }else{

@@ -1,0 +1,10 @@
+LTX server - minimal version (file mode)
+(C) TerraTransfer GmbH, Bochum, Germany - www.terratransfer.de
+
+This software is provided to the licensee for operating TerraTransfer LTX data loggers
+on the licensee's own servers. Redistribution to third parties requires written permission
+of TerraTransfer GmbH.
+
+The software is provided "as is", without warranty of any kind. TerraTransfer GmbH is not
+liable for any loss of data or damage resulting from the use of this software. Keep the
+data directory backed up.

@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Serveur LTX version minimale - manuel</title><style>
+body{font-family:Arial,Helvetica,sans-serif;font-size:11pt;line-height:1.45;color:#222;max-width:900px;margin:2em auto;padding:0 1.5em}
+h1{font-size:20pt;border-bottom:2px solid #1a5276;padding-bottom:.3em;color:#1a5276}
+h2{font-size:15pt;margin-top:1.8em;color:#1a5276}
+h3{font-size:12.5pt;margin-top:1.4em}
+code{font-family:Consolas,Menlo,monospace;font-size:9.5pt;background:#f2f4f7;padding:1px 3px;border-radius:3px}
+pre{background:#f2f4f7;border:1px solid #d5dbe3;padding:.7em;overflow-x:auto;font-size:9.5pt;line-height:1.35}
+pre code{background:none;padding:0}
+table{border-collapse:collapse;width:100%;margin:.8em 0;font-size:10pt}
+th,td{border:1px solid #c9d1dc;padding:.35em .5em;vertical-align:top;text-align:left}
+th{background:#e8eef5}
+li{margin:.15em 0}
+@media print{body{max-width:none;margin:0;font-size:10pt} pre{white-space:pre-wrap} h2{page-break-after:avoid}}
+</style></head>
+<body>
+<h1 id="serveur-ltx-version-minimale-manuel-dinstallation-et-dexploitation">Serveur LTX – version minimale : manuel d'installation et d'exploitation</h1>
+<p>Version 1.0, octobre 2026. (C) TerraTransfer GmbH, www.terratransfer.de</p>
+<h2 id="1-vue-densemble">1. Vue d'ensemble</h2>
+<p>La version minimale du serveur LTX est une petite application web PHP qui reçoit par HTTP ou HTTPS les
+données des enregistreurs de données TerraTransfer LTX et les stocke sous forme de fichiers texte brut,
+avec un répertoire par enregistreur. Une interface web protégée par mot de passe affiche l'état des
+enregistreurs, exporte les données au format CSV, trace des graphiques et envoie des fichiers de
+paramètres ou des commandes aux enregistreurs.</p>
+<p>Elle n'a besoin ni d'une base de données ni d'une connexion à Internet. Le serveur ne contacte jamais
+d'autre hôte ; le seul trafic réseau est constitué des appels des enregistreurs vers le serveur. Toutes
+les données restent sur votre serveur.</p>
+<p>Par rapport au serveur LTX complet, les fonctions suivantes ne sont pas incluses : tableau de bord,
+gestion des utilisateurs, alarmes par e-mail ou par SMS, envoi (push) de données vers d'autres systèmes,
+rétention automatique des données, mises à jour du firmware via le serveur, affichage cartographique.</p>
+<p>Les enregistreurs eux-mêmes sont mis en service sur site par Bluetooth avec l'application web
+Aquatos Field (section 5) ; le serveur se contente de recevoir leurs données et de transmettre les
+fichiers de paramètres et les commandes.</p>
+<h2 id="2-prerequis">2. Prérequis</h2>
+<table>
+<thead>
+<tr>
+<th>Élément</th>
+<th>Exigence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Matériel</td>
+<td>Linux ou Windows, petite machine virtuelle ou ordinateur monocarte, par exemple 1 cœur de processeur, 1 Go de RAM</td>
+</tr>
+<tr>
+<td>Serveur web</td>
+<td>Apache 2.4 ou nginx (toute version avec PHP-FPM)</td>
+</tr>
+<tr>
+<td>PHP</td>
+<td>7.4 ou plus récent, 8.x recommandé ; extensions <code>session</code>, <code>ctype</code>, <code>iconv</code> (activées par défaut) et <code>gd</code> (graphiques)</td>
+</tr>
+<tr>
+<td>Disque</td>
+<td>Fichiers texte, typiquement 2 à 3 Mo par enregistreur et par an avec un intervalle de 15 minutes</td>
+</tr>
+<tr>
+<td>Réseau</td>
+<td>Les enregistreurs joignent le serveur en HTTP ou HTTPS sur le port 80 ou 443 (LAN, VPN ou APN privé)</td>
+</tr>
+<tr>
+<td>Heure</td>
+<td>Heure système correcte (UTC) ; le serveur transmet son heure aux enregistreurs à chaque contact</td>
+</tr>
+</tbody>
+</table>
+<p>Non nécessaires : base de données, serveur de messagerie, tâches cron, curl, accès à Internet.</p>
+<h2 id="3-installation">3. Installation</h2>
+<p>L'application se compose de trois répertoires : <code>sw/</code> (point d'entrée des appareils et configuration),
+<code>legacy/</code> (interface web) et <code>docs/</code> (ce manuel). Les exemples ci-dessous l'installent dans le
+répertoire <code>ltx</code> de la racine web ; les URL sont donc de la forme <code>http://&lt;server&gt;/ltx/...</code>. Tout autre
+nom de répertoire convient, à condition d'adapter les chemins en conséquence.</p>
+<h3 id="31-linux-avec-apache-debianubuntu">3.1 Linux avec Apache (Debian/Ubuntu)</h3>
+<pre><code>sudo apt install apache2 php libapache2-mod-php php-gd
+sudo mkdir -p /var/www/html/ltx
+sudo unzip LTX_server_minimal_*.zip -d /var/www/html/        # creates /var/www/html/ltx
+sudo mkdir -p /var/lib/ltx-data
+sudo chown www-data:www-data /var/lib/ltx-data
+sudo chmod 750 /var/lib/ltx-data
+</code></pre>
+<p>Modifiez <code>/var/www/html/ltx/sw/conf/api_key.inc.php</code> (voir la section 4), puis redémarrez Apache
+(<code>sudo systemctl restart apache2</code>). Sous RHEL/Rocky/Alma, les paquets s'appellent <code>httpd php php-gd</code>
+et l'utilisateur du serveur web est <code>apache</code>.</p>
+<p>Si vous conservez le répertoire de données dans la racine web (par défaut <code>data_secret</code>, à côté de
+<code>sw/</code>), Apache doit prendre en compte les fichiers <code>.htaccess</code> : définissez <code>AllowOverride All</code> (ou
+<code>AuthConfig</code>) pour ce répertoire dans l'hôte virtuel. Le serveur crée automatiquement
+<code>data_secret/.htaccess</code> avec <code>Require all denied</code>.</p>
+<h3 id="32-linux-avec-nginx">3.2 Linux avec nginx</h3>
+<pre><code>sudo apt install nginx php-fpm php-gd
+</code></pre>
+<p>Bloc server (remplacez <code>php8.2-fpm</code> par votre version de PHP-FPM) :</p>
+<pre><code>server {
+    listen 80;
+    server_name ltx.example.local;
+    root /var/www/html;
+    index index.php;
+
+    location ~ ^/ltx/data_secret/ { deny all; }       # only if the data directory is inside the web root
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/run/php/php8.2-fpm.sock;
+    }
+}
+</code></pre>
+<p>Créez le répertoire de données comme à la section 3.1 (utilisateur <code>www-data</code>) et rechargez nginx.</p>
+<h3 id="33-windows-avec-xampp">3.3 Windows avec XAMPP</h3>
+<ol>
+<li>Installez XAMPP (Apache + PHP 8.x) depuis apachefriends.org.</li>
+<li>Décompressez l'archive ZIP dans <code>C:\xampp\htdocs\</code> de sorte que le fichier
+   <code>C:\xampp\htdocs\ltx\sw\lxu_v1.php</code> existe.</li>
+<li>Dans <code>C:\xampp\php\php.ini</code>, vérifiez que la ligne <code>extension=gd</code> est présente et n'est pas mise en
+   commentaire (<code>;</code> supprimé). Redémarrez Apache depuis le panneau de contrôle XAMPP.</li>
+<li>Créez un répertoire de données, par exemple <code>C:\ltx-data</code>, et indiquez-le dans la configuration sous
+   la forme <code>C:/ltx-data</code> (avec des barres obliques « / »).</li>
+<li>Configurez Apache comme service Windows (panneau de contrôle XAMPP) afin qu'il démarre
+   automatiquement.</li>
+<li>Vérifiez que l'heure de Windows est synchronisée (les enregistreurs reprennent l'heure du serveur).</li>
+</ol>
+<h3 id="34-https-facultatif">3.4 HTTPS (facultatif)</h3>
+<p>Configurez HTTPS dans le serveur web de la manière habituelle (Apache <code>mod_ssl</code>, nginx
+<code>ssl_certificate</code> ou un proxy inverse). Les enregistreurs doivent accepter le certificat du serveur :
+avant de basculer les enregistreurs en HTTPS, convenez avec TerraTransfer du certificat (autorité de
+certification publique ou votre propre autorité de certification) auquel les enregistreurs font
+confiance. L'interface web peut être utilisée en HTTPS sans aucune modification.</p>
+<h2 id="4-configuration">4. Configuration</h2>
+<p>Tous les paramètres se trouvent dans <code>sw/conf/api_key.inc.php</code> :</p>
+<table>
+<thead>
+<tr>
+<th>Paramètre</th>
+<th>Signification</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>S_DATA</code></td>
+<td>Répertoire de données. Valeur par défaut : <code>../data_secret</code> (relatif à <code>sw/</code> et <code>legacy/</code>). Recommandé : un chemin absolu en dehors de la racine web, par exemple <code>/var/lib/ltx-data</code> ou <code>C:/ltx-data</code>. L'utilisateur du serveur web doit disposer d'un accès en écriture.</td>
+</tr>
+<tr>
+<td><code>L_KEY</code></td>
+<td>Mot de passe de l'interface web. Choisissez un mot de passe long ; c'est la seule protection de l'interface.</td>
+</tr>
+<tr>
+<td><code>D_API_KEY</code></td>
+<td>Clé d'appareil. Chaque enregistreur envoie cette clé à chaque contact. La valeur est convenue avec TerraTransfer et enregistrée dans les enregistreurs.</td>
+</tr>
+<tr>
+<td><code>DB_QUOTA</code></td>
+<td>Contenu initial de <code>quota_days.dat</code> des nouveaux enregistreurs (jours, lignes). Purement informatif dans cette version.</td>
+</tr>
+<tr>
+<td><code>MAXM_2GM</code>, <code>MAXM_NB</code>, <code>MXGET_MEM</code></td>
+<td>Taille maximale d'envoi par contact pour 2G/LTE-M et pour LTE-NB, ainsi que la limite multibloc. Conservez les valeurs par défaut, sauf indication contraire de TerraTransfer.</td>
+</tr>
+</tbody>
+</table>
+<p>Le serveur refuse toute requête tant que <code>L_KEY</code> ou <code>D_API_KEY</code> contiennent encore la valeur fictive
+<code>CHANGE_ME</code>.</p>
+<p>Paramètres PHP (<code>php.ini</code>) : les valeurs par défaut suffisent. Si vous souhaitez téléverser vers un
+enregistreur, via l'interface web, des fichiers de plus de 2 Mo, augmentez <code>upload_max_filesize</code> et
+<code>post_max_size</code>. Définissez <code>date.timezone = UTC</code> pour éviter les avertissements.</p>
+<h2 id="5-connexion-des-enregistreurs">5. Connexion des enregistreurs</h2>
+<p>Chaque enregistreur a besoin des paramètres suivants ; ils sont enregistrés dans son fichier de
+paramètres système (<code>sys_param.lxp</code>) et sont normalement définis par TerraTransfer avant la livraison :</p>
+<ul>
+<li>nom d'hôte ou adresse IP du serveur, par exemple <code>ltx.example.local</code> ou <code>192.168.1.10</code> ;</li>
+<li>chemin du point d'entrée des appareils : <code>ltx/sw/lxu_v1.php</code> (modifiez <code>ltx</code> si vous avez installé
+  l'application ailleurs) ;</li>
+<li>la clé d'appareil (<code>D_API_KEY</code>) ;</li>
+<li>HTTP ou HTTPS, port 80 ou 443.</li>
+</ul>
+<p>Veuillez transmettre ces valeurs à TerraTransfer lors de la commande des enregistreurs, ou modifiez-les
+vous-même via l'interface web (section 7.4, fichier <code>sys_param.lxp</code>). Une valeur erronée dans
+<code>sys_param.lxp</code> déconnecte l'enregistreur du serveur ; modifiez donc ce fichier avec précaution.</p>
+<p><strong>Configuration sur site avec l'application web Aquatos Field.</strong> Le serveur ne peut pas effectuer la
+configuration initiale d'un enregistreur. La mise en service et la maintenance sur site s'effectuent
+par Bluetooth avec l'application web Aquatos Field de TerraTransfer
+(<a href="https://aquatos-field.netlify.app">aquatos-field.netlify.app</a>) : configuration initiale (adresse du
+serveur, clé d'appareil, APN de la carte SIM, intervalles de mesure et de transmission), mesures de
+test, tarage (mise à zéro) des capteurs de niveau, lecture de la mémoire de l'enregistreur, autotest et
+rapports PDF. L'application fonctionne dans le navigateur via Web Bluetooth (Chrome ou Edge sur
+ordinateur et sous Android, iOS via le navigateur Bluefy) et ne nécessite aucune installation. Les
+modifications ultérieures des fichiers de paramètres peuvent également être effectuées dans l'interface
+web du serveur (section 7.4) ; l'enregistreur les applique lors de son prochain contact.</p>
+<p>Déroulement d'un contact : l'enregistreur appelle
+<code>http(s)://&lt;server&gt;/ltx/sw/lxu_v1.php?k=&lt;key&gt;&amp;s=&lt;MAC&gt;</code> et envoie ses nouvelles données (HTTP POST). La
+réponse contient l'heure du serveur et les commandes en attente. Avec les réglages par défaut, un
+enregistreur effectue une mesure toutes les 15 minutes et appelle le serveur une fois par heure ; ces
+deux intervalles sont des paramètres de l'enregistreur.</p>
+<h2 id="6-premier-test">6. Premier test</h2>
+<ol>
+<li>Ouvrez <code>http://&lt;server&gt;/ltx/</code> dans un navigateur. Vous êtes redirigé vers l'interface web.
+   Connectez-vous avec <code>L_KEY</code>.</li>
+<li>La liste des appareils est vide tant que le premier enregistreur n'a pas appelé. Le journal principal
+   (<code>&lt;S_DATA&gt;/log/log.txt</code>, lien « Main Logfile » sur la page d'accueil) affiche chaque contact, y
+   compris les contacts rejetés, par exemple <code>(ERROR:'API Key')</code> pour une clé d'appareil erronée.</li>
+<li>Après le premier contact, l'enregistreur apparaît dans la liste avec son adresse MAC (16 chiffres
+   hexadécimaux) et son nom. Ouvrez la page de l'appareil et vérifiez « Last Contact » et
+   « Files on Device ». Les premiers contacts transmettent la liste des fichiers et les fichiers de
+   paramètres ; les données suivent lors du prochain envoi régulier.</li>
+</ol>
+<h2 id="7-interface-web">7. Interface web</h2>
+<h3 id="71-connexion-mode-invite-et-mode-demo">7.1 Connexion, mode invité et mode démo</h3>
+<p><code>legacy/index.php</code> est la page d'accueil. Sans connexion, la page est en mode invité (lecture seule) et
+n'affiche que les enregistreurs marqués comme appareils de démonstration (« Enable Demo-Mode » sur la
+page d'accueil après connexion). La connexion avec <code>L_KEY</code> donne un accès complet ; « Logout » met fin à
+la session. Les pages s'actualisent automatiquement toutes les 15 à 30 secondes.</p>
+<h3 id="72-liste-des-appareils">7.2 Liste des appareils</h3>
+<p>Pour chaque enregistreur, la liste affiche l'adresse MAC (lien vers la page de l'appareil), le nom de
+l'appareil tiré de <code>iparam.lxp</code>, le « legacy name » (un texte libre que vous pouvez définir sur le
+serveur), le pays du réseau mobile et l'heure du dernier contact. La couleur du dernier contact indique
+son ancienneté : vert = moins de 2 minutes, jaune clair = plus de 2 heures, jaune = plus de 4 heures,
+rose = plus de 12 heures, rose foncé = plus de 24 heures, rouge = plus de 3 jours, magenta = plus de
+14 jours.</p>
+<p>Sous la liste : liens vers le fichier journal principal, vers l'explorateur de fichiers (répertoire de
+données uniquement) et vers la page d'informations PHP.</p>
+<h3 id="73-page-de-lappareil">7.3 Page de l'appareil</h3>
+<p><strong>Device Info</strong> : nom, legacy name, dernier contact avec son motif (AUTO = régulier, MANUAL = déclenché
+sur l'enregistreur, RESET, ALARM), écart de l'horloge de l'enregistreur, compteurs de transmission,
+version et date du firmware, type d'appareil, SIM (ICCID), mémoire libre de l'enregistreur, signal
+mobile (dBm, type de réseau, pays), position si l'enregistreur en indique une, dernière commande
+utilisateur et son état. « Last Transmission OK » indique la dernière confirmation d'une commande ;
+<code>[OK]</code> l'efface.</p>
+<p><strong>Files on Device</strong> : le répertoire de l'enregistreur tel qu'il a été relevé lors de la dernière lecture
+du répertoire. <code>[GET DIR]</code> demande une nouvelle liste des fichiers lors du prochain contact. Pour chaque
+fichier : taille, date et indicateurs (flags) sur l'appareil, ainsi que l'état de la copie locale
+(« miroir ») sur le serveur : <code>UP-TO-DATE</code> signifie que le serveur possède le fichier complet.</p>
+<ul>
+<li><code>data.edt</code> : <code>[Open local]</code> texte brut, <code>[View CSV]</code> conversion en CSV dans le navigateur, <code>[CSV(D)]</code>
+  téléchargement au format numérique allemand (virgule décimale, point-virgule), <code>[CSV(Int)]</code>
+  téléchargement avec point décimal, <code>[CSVIEW]</code> graphique.</li>
+<li><code>iparam.lxp</code>, <code>sys_param.lxp</code> : <code>[Open local]</code> et <code>[Edit]</code> (section 7.4).</li>
+<li><code>[GET(remote)]</code> demande à l'enregistreur d'envoyer le fichier complet lors du prochain contact (utile
+  si le miroir est incomplet). <code>[DEL(remote)]</code> supprime le fichier sur l'enregistreur. Ces deux
+  commandes sont placées en file d'attente et exécutées lors du prochain contact ; d'ici là, les entrées
+  de la file d'attente peuvent être de nouveau supprimées.</li>
+</ul>
+<p><strong>Cumulative data on server</strong> : <code>out_total/total.edt</code> contient tout ce que le serveur a reçu de cet
+enregistreur depuis le début, dans l'ordre d'arrivée. Les mêmes liens d'affichage, de téléchargement et
+de graphique sont disponibles. Utilisez ce fichier pour l'archivage et l'analyse à long terme ;
+<code>data.edt</code> n'est qu'un miroir du fichier présent sur l'enregistreur et est remplacé lorsque
+l'enregistreur commence un nouveau fichier.</p>
+<p><strong>Files to 'put'</strong> : fichiers en attente de transfert vers l'enregistreur (section 7.4), avec le nombre
+de tentatives. <code>[Remove]</code> annule le transfert.</p>
+<p><strong>Manage</strong> : liens vers les fichiers journaux de l'enregistreur (contacts, connexions, commandes
+utilisateur), « Upload Files to Device's Filesystem » (n'importe quel fichier, par exemple un fichier
+de paramètres préparé), « Send Server Command (Byte) » et « Send User Command (Text) » (commandes
+définies par le firmware de l'enregistreur ; à n'utiliser que sur instruction de TerraTransfer),
+<code>[Enable DEBUG]</code> (enregistre chaque envoi sous forme brute dans <code>dbg/</code> ; à désactiver de nouveau après
+le diagnostic).</p>
+<h3 id="74-modification-des-fichiers-de-parametres">7.4 Modification des fichiers de paramètres</h3>
+<p><code>[Edit]</code>, à côté de <code>iparam.lxp</code> ou de <code>sys_param.lxp</code>, ouvre un formulaire avec un champ de saisie par
+ligne et une brève description des champs connus. « Submit » enregistre le fichier dans la file
+d'attente <code>put/</code> ; l'enregistreur le reçoit lors du prochain contact et l'applique. <code>iparam.lxp</code> contient
+les intervalles de mesure et de transmission, les définitions des canaux (unité, décimales, mise à
+l'échelle, seuils d'alarme) et le nom de l'appareil. <code>sys_param.lxp</code> contient les paramètres réseau et
+serveur (APN, serveur, chemin, clé). Ne modifiez que les champs dont vous connaissez la signification ;
+en cas de doute, adressez-vous à TerraTransfer.</p>
+<h3 id="75-graphiques-csview">7.5 Graphiques (CSVIEW)</h3>
+<p><code>[CSVIEW]</code> convertit le fichier de données en CSV et trace un graphique (extension PHP <code>gd</code> nécessaire).
+Les cases à cocher activent et désactivent les canaux, les flèches font défiler l'affichage, les boutons
+en forme de loupe permettent de zoomer, « Export CSV » télécharge les données affichées. Les fichiers
+CSV temporaires sont stockés dans <code>&lt;S_DATA&gt;/stemp</code> et supprimés automatiquement au bout de deux heures.</p>
+<h2 id="8-stockage-des-donnees">8. Stockage des données</h2>
+<h3 id="81-structure-des-repertoires">8.1 Structure des répertoires</h3>
+<pre><code>&lt;S_DATA&gt;/
+  .htaccess                       denies web access (Apache)
+  log/log.txt, _log_old.txt       main log of all contacts (rotated at 100 kB)
+  stemp/                          temporary CSV files of the chart viewer
+  &lt;MAC&gt;/                          one directory per logger, 16 hex digits
+    files/data.edt                mirror of the data file on the logger (EDT format)
+    files/data.edt.bak            previous version of the mirror
+    files/iparam.lxp              parameters of the logger
+    files/sys_param.lxp           system parameters (network, server, key)
+    out_total/total.edt           cumulative data: every received fragment is appended here
+    in_new/                       fragments of the current upload (moved to total.edt at once)
+    cmd/                          metadata of the device files (*.vmeta, *.fmeta), pending commands
+    get/ put/ del/                queues: files to fetch from / send to / delete on the logger
+    dbg/                          raw uploads while debug is enabled
+    device_info.dat               status written at every contact (key/value)
+    log.txt, _log_old.txt         log of this logger (rotated at 50 kB)
+    conn_log.txt                  mobile network information per contact
+    userio.txt                    user commands and replies
+    dapikey.dat                   device key as accepted for this logger
+    quota_days.dat                retention settings (informational)
+    user_info.dat                 legacy name set in the web interface
+    date0.dat                     time of the first contact
+</code></pre>
+<p>Tous les fichiers sont des fichiers texte, à l'exception des envois bruts dans <code>dbg/</code>.</p>
+<h3 id="82-format-de-donnees-edt">8.2 Format de données EDT</h3>
+<p>EDT (« Easy Data ») est un format texte brut, en UTF-8, avec un enregistrement par ligne :</p>
+<pre><code>!U 0:cm 1:°C 2:us/cm 90:V(Bat) 91:°C(int) 92:%rH(int)
+!1791806400 0:-43.917045 1:13.50 2:1.23 90:3.638 91:16.3 92:9.4
+!+900 0:-43.917045 1:13.50 2:1.26
+&lt;NT AUTO OK(637,51,0)&gt;
+</code></pre>
+<ul>
+<li><code>!U</code> – unités des canaux ; apparaît au début et à chaque modification des paramètres.</li>
+<li><code>!&lt;seconds&gt;</code> – mesure avec un horodatage UTC absolu (secondes Unix), suivie de paires
+  <code>channel:value</code>.</li>
+<li><code>!+&lt;seconds&gt;</code> – mesure relative à la ligne précédente.</li>
+<li>Les canaux 0–89 sont des mesures, les canaux 90–99 des valeurs d'état de l'enregistreur (tension de la
+  batterie, température et humidité internes). Une ligne ne contient que les canaux mesurés à ce
+  moment-là.</li>
+<li><code>NoReply</code> à la place d'une valeur : le capteur n'a pas répondu. Une valeur commençant par <code>*</code> a
+  dépassé un seuil d'alarme.</li>
+<li>Les lignes commençant par <code>&lt;</code> sont des événements : <code>&lt;NT AUTO OK(…)&gt;</code> envoi, <code>&lt;NT AUTO ERROR …&gt;</code>
+  envoi échoué, <code>&lt;RESET …&gt;</code> redémarrage, <code>&lt;COOKIE …&gt;</code> synchronisation de l'heure, <code>&lt;NEW&gt;</code> début d'un
+  fichier. Après un redémarrage, l'horloge de l'enregistreur repart de zéro jusqu'à la prochaine
+  synchronisation ; ces lignes apparaissent avec des dates en 1970.</li>
+<li>Les lignes commençant par <code>$</code> sont des enregistrements compressés ; l'interface web les décode.</li>
+</ul>
+<h3 id="83-export-csv">8.3 Export CSV</h3>
+<p>Les vues et téléchargements CSV comportent les colonnes <code>NO</code> (numéro de ligne dans le fichier EDT),
+<code>TIME(UTC)</code> (<code>dd.mm.yy hh:mm:ss</code>) et une colonne par canal, nommée <code>unit(channel)</code>. Les canaux absents
+d'une ligne restent vides. <code>[CSV(D)]</code> utilise des points-virgules et une virgule décimale, <code>[CSV(Int)]</code>
+des virgules et un point décimal. Le paramètre d'URL <code>utc=&lt;seconds&gt;</code> décale la colonne de l'heure, par
+exemple <code>utc=3600</code> pour UTC+1.</p>
+<h2 id="9-exploitation">9. Exploitation</h2>
+<p><strong>Sauvegarde</strong> : sauvegardez régulièrement le répertoire de données avec n'importe quel outil de
+sauvegarde de fichiers. Les fichiers sont écrits à chaque contact d'un enregistreur ; une sauvegarde
+effectuée pendant un contact peut se terminer par une dernière ligne incomplète dans <code>total.edt</code>, que la
+visionneuse affiche comme du texte ; aucune autre donnée n'est affectée.</p>
+<p><strong>Espace disque</strong> : <code>out_total/total.edt</code> croît sans limite (environ 2 à 3 Mo par an et par enregistreur
+avec un intervalle de 15 minutes). Pour archiver, déplacez ou tronquez le fichier entre deux contacts de
+l'enregistreur ; l'envoi suivant se poursuit dans un nouveau fichier. <code>stemp/</code> et <code>dbg/</code> peuvent être
+vidés à tout moment.</p>
+<p><strong>Supervision</strong> : la liste des appareils indique par une couleur l'ancienneté du dernier contact. Un
+enregistreur qui n'a pas appelé depuis plus de deux fois son intervalle de transmission doit être contrôlé
+(alimentation, SIM, signal). Le journal principal affiche les contacts rejetés, par exemple ceux d'un
+enregistreur dont la clé est incorrecte.</p>
+<p><strong>Journaux</strong> : <code>&lt;S_DATA&gt;/log/log.txt</code> (tous les contacts, une ligne par contact, avec le résultat et la
+durée d'exécution), <code>&lt;MAC&gt;/log.txt</code> (contacts d'un enregistreur), <code>&lt;MAC&gt;/conn_log.txt</code> (détails du
+réseau), <code>&lt;MAC&gt;/userio.txt</code> (commandes utilisateur et réponses). Les journaux font l'objet d'une rotation
+automatique ; la version précédente est conservée sous la forme <code>_…_old.txt</code>.</p>
+<p><strong>Heure</strong> : maintenez l'horloge du serveur synchronisée (NTP). Les enregistreurs reprennent l'heure du
+serveur à chaque contact ; une heure de serveur erronée produit des horodatages erronés dans les données.</p>
+<p><strong>Mises à jour</strong> : pour installer une nouvelle version, remplacez les répertoires <code>sw/</code>, <code>legacy/</code> et
+<code>docs/</code> en conservant <code>sw/conf/api_key.inc.php</code> et le répertoire de données. Consultez les notes de
+version pour connaître les éventuelles modifications de paramètres.</p>
+<p><strong>Migration vers un autre serveur</strong> : installez le logiciel sur le nouveau serveur, copiez le répertoire
+de données et la configuration, puis modifiez l'adresse du serveur dans les enregistreurs (section 5) ou
+redirigez l'ancien nom d'hôte. Les enregistreurs conservent leurs données jusqu'au prochain envoi réussi.</p>
+<h2 id="10-depannage">10. Dépannage</h2>
+<table>
+<thead>
+<tr>
+<th>Symptôme</th>
+<th>Cause / que faire</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Le navigateur affiche <code>ERROR: 'Server not configured (sw/conf/api_key.inc.php)'</code></td>
+<td>Les valeurs fictives <code>CHANGE_ME</code> figurent encore dans la configuration.</td>
+</tr>
+<tr>
+<td>L'enregistreur n'apparaît pas, le journal principal affiche <code>(ERROR:'API Key')</code></td>
+<td>La clé d'appareil enregistrée dans l'enregistreur diffère de <code>D_API_KEY</code>.</td>
+</tr>
+<tr>
+<td>L'enregistreur n'apparaît pas, rien dans le journal principal</td>
+<td>L'enregistreur ne peut pas joindre le serveur : vérifiez le nom d'hôte/l'IP, le chemin, le port, le pare-feu, l'APN/le VPN ; contrôlez sur site les paramètres de l'enregistreur avec l'application web Aquatos Field (section 5) ; activez le débogage dans l'enregistreur avec l'aide de TerraTransfer.</td>
+</tr>
+<tr>
+<td>Le journal principal reste vide alors que des enregistreurs appellent ; avertissements PHP <code>mkdir</code>/<code>fopen</code> … <code>Permission denied</code> dans le journal d'erreurs du serveur web</td>
+<td>Le répertoire de données n'est pas accessible en écriture pour l'utilisateur du serveur web, ou le chemin <code>S_DATA</code> est erroné.</td>
+</tr>
+<tr>
+<td>La page de l'appareil affiche <code>(no Directory Scan)</code></td>
+<td>Pas encore de contact complet, ou les premiers contacts ont échoué. Utilisez <code>[GET DIR]</code>.</td>
+</tr>
+<tr>
+<td>Miroir <code>data.edt</code> incomplet (<code>ERROR: Real-Local</code>)</td>
+<td>Utilisez <code>[GET(remote)]</code> pour récupérer le fichier complet lors du prochain contact.</td>
+</tr>
+<tr>
+<td><code>[CSVIEW]</code> affiche <code>the PHP extension 'gd' is required</code></td>
+<td>Activez <code>gd</code> dans <code>php.ini</code> et redémarrez le serveur web.</td>
+</tr>
+<tr>
+<td>La connexion échoue alors que le mot de passe est correct</td>
+<td>Les sessions PHP ne peuvent pas être enregistrées (<code>session.save_path</code> non accessible en écriture) ou les cookies sont bloqués.</td>
+</tr>
+<tr>
+<td>Horodatages en 1970</td>
+<td>L'enregistreur a été redémarré et n'a pas encore reçu l'heure du serveur ; le problème disparaît au prochain contact.</td>
+</tr>
+<tr>
+<td>Le répertoire de données est accessible depuis le navigateur</td>
+<td>Apache : <code>AllowOverride</code> manquant ; nginx : ajoutez le bloc location <code>deny all</code>. Mieux encore : déplacez le répertoire en dehors de la racine web.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="11-remarques-sur-la-securite">11. Remarques sur la sécurité</h2>
+<ul>
+<li>L'interface web n'est protégée que par un mot de passe unique, qui donne tous les droits. Restreignez
+  l'accès à l'interface (pare-feu, VPN ou authentification supplémentaire dans le serveur web) lorsque
+  le serveur est joignable depuis des réseaux non fiables.</li>
+<li>Les enregistreurs envoient la clé d'appareil à chaque contact. Utilisez HTTPS ou un réseau privé (VPN,
+  APN privé).</li>
+<li>Placez le répertoire de données en dehors de la racine web ou protégez-le par le serveur web ; il
+  contient la clé d'appareil (<code>dapikey.dat</code>).</li>
+<li>Maintenez PHP et le serveur web à jour.</li>
+</ul>
+</body></html>

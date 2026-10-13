@@ -16,6 +16,9 @@ Not included compared with the full LTX server: dashboard, user management, e-ma
 alarms, data push to other systems, automatic data retention, firmware updates via the server,
 map view.
 
+The loggers themselves are commissioned on site via Bluetooth with the Aquatos Field web app
+(section 5); the server only receives their data and passes on parameter files and commands.
+
 ## 2. Requirements
 
 | Item | Requirement |
@@ -130,6 +133,16 @@ Each logger needs the following settings; they are stored in its system paramete
 Please send these values to TerraTransfer when ordering loggers, or change them yourself via the
 web interface (section 7.4, file `sys_param.lxp`). A wrong value in `sys_param.lxp` disconnects
 the logger from the server, so change this file with care.
+
+**On-site configuration with the Aquatos Field web app.** The server cannot perform the initial
+setup of a logger. Commissioning and service on site are done via Bluetooth with the Aquatos Field
+web app from TerraTransfer ([aquatos-field.netlify.app](https://aquatos-field.netlify.app)):
+initial configuration (server address, device key, APN of the SIM card, measurement and
+transmission intervals), test measurements, taring (zero adjustment) of level sensors, reading out
+the logger memory, self-test and PDF reports. The app runs in the browser via Web Bluetooth
+(Chrome or Edge on desktop and Android, iOS via the Bluefy browser) and needs no installation.
+Later changes to the parameter files can also be made in the web interface of the server (section
+7.4); the logger applies them at its next contact.
 
 Contact sequence: the logger calls `http(s)://<server>/ltx/sw/lxu_v1.php?k=<key>&s=<MAC>` and
 uploads its new data (HTTP POST). The reply contains the server time and pending commands. With
@@ -319,7 +332,7 @@ the old host name. Loggers keep their data until the next successful upload.
 |---|---|
 | Browser shows `ERROR: 'Server not configured (sw/conf/api_key.inc.php)'` | Placeholders `CHANGE_ME` still in the configuration. |
 | Logger does not appear, main log shows `(ERROR:'API Key')` | Device key in the logger differs from `D_API_KEY`. |
-| Logger does not appear, nothing in the main log | Logger cannot reach the server: check host name/IP, path, port, firewall, APN/VPN; enable debug in the logger with TerraTransfer. |
+| Logger does not appear, nothing in the main log | Logger cannot reach the server: check host name/IP, path, port, firewall, APN/VPN; check the logger settings on site with the Aquatos Field web app (section 5); enable debug in the logger with TerraTransfer. |
 | Main log stays empty although loggers call, PHP warnings `mkdir`/`fopen` … `Permission denied` in the web server error log | Data directory not writable for the web server user, or wrong `S_DATA` path. |
 | Device page shows `(no Directory Scan)` | No complete contact yet, or the first contacts failed. Use `[GET DIR]`. |
 | Mirror `data.edt` incomplete (`ERROR: Real-Local`) | Use `[GET(remote)]` to fetch the whole file at the next contact. |

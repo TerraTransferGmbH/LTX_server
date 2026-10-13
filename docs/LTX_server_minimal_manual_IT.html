@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Server LTX versione minima - manuale</title><style>
+body{font-family:Arial,Helvetica,sans-serif;font-size:11pt;line-height:1.45;color:#222;max-width:900px;margin:2em auto;padding:0 1.5em}
+h1{font-size:20pt;border-bottom:2px solid #1a5276;padding-bottom:.3em;color:#1a5276}
+h2{font-size:15pt;margin-top:1.8em;color:#1a5276}
+h3{font-size:12.5pt;margin-top:1.4em}
+code{font-family:Consolas,Menlo,monospace;font-size:9.5pt;background:#f2f4f7;padding:1px 3px;border-radius:3px}
+pre{background:#f2f4f7;border:1px solid #d5dbe3;padding:.7em;overflow-x:auto;font-size:9.5pt;line-height:1.35}
+pre code{background:none;padding:0}
+table{border-collapse:collapse;width:100%;margin:.8em 0;font-size:10pt}
+th,td{border:1px solid #c9d1dc;padding:.35em .5em;vertical-align:top;text-align:left}
+th{background:#e8eef5}
+li{margin:.15em 0}
+@media print{body{max-width:none;margin:0;font-size:10pt} pre{white-space:pre-wrap} h2{page-break-after:avoid}}
+</style></head>
+<body>
+<h1 id="server-ltx-versione-minima-manuale-di-installazione-e-gestione-operativa">Server LTX – versione minima: manuale di installazione e gestione operativa</h1>
+<p>Versione 1.0, ottobre 2026. (C) TerraTransfer GmbH, www.terratransfer.de</p>
+<h2 id="1-panoramica">1. Panoramica</h2>
+<p>La versione minima del server LTX è una piccola applicazione web in PHP che riceve, tramite HTTP o
+HTTPS, i dati dei datalogger LTX di TerraTransfer e li memorizza come semplici file di testo, con
+una directory per ciascun datalogger. Un'interfaccia web protetta da password mostra lo stato dei
+datalogger, esporta i dati in formato CSV, disegna grafici e invia ai datalogger file dei
+parametri o comandi.</p>
+<p>Non sono necessari né un database né un collegamento a Internet. Il server non contatta mai altri
+host; l'unico traffico di rete è costituito dalle chiamate dei datalogger al server. Tutti i dati
+restano sul server dell'utente.</p>
+<p>Rispetto al server LTX completo non sono inclusi: dashboard, gestione degli utenti, allarmi via
+e-mail o SMS, invio (push) dei dati ad altri sistemi, gestione automatica della conservazione dei
+dati, aggiornamenti del firmware tramite il server, visualizzazione su mappa.</p>
+<p>I datalogger stessi vengono messi in servizio sul posto via Bluetooth con l'applicazione web
+Aquatos Field (sezione 5); il server si limita a ricevere i loro dati e a trasmettere file dei
+parametri e comandi.</p>
+<h2 id="2-requisiti">2. Requisiti</h2>
+<table>
+<thead>
+<tr>
+<th>Voce</th>
+<th>Requisito</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Hardware</td>
+<td>Linux o Windows, piccola macchina virtuale (VM) o computer a scheda singola, ad es. 1 core CPU, 1 GB di RAM</td>
+</tr>
+<tr>
+<td>Server web</td>
+<td>Apache 2.4 o nginx (qualsiasi versione con PHP-FPM)</td>
+</tr>
+<tr>
+<td>PHP</td>
+<td>7.4 o successivo, consigliato 8.x; estensioni <code>session</code>, <code>ctype</code>, <code>iconv</code> (abilitate per impostazione predefinita) e <code>gd</code> (grafici)</td>
+</tr>
+<tr>
+<td>Disco</td>
+<td>File di testo, tipicamente 2–3 MB per datalogger e per anno con intervalli di 15 minuti</td>
+</tr>
+<tr>
+<td>Rete</td>
+<td>I datalogger raggiungono il server tramite HTTP o HTTPS sulla porta 80 o 443 (LAN, VPN o APN privato)</td>
+</tr>
+<tr>
+<td>Ora</td>
+<td>Ora di sistema corretta (UTC); il server invia la propria ora ai datalogger a ogni contatto</td>
+</tr>
+</tbody>
+</table>
+<p>Non sono necessari: database, server di posta, job cron, curl, accesso a Internet.</p>
+<h2 id="3-installazione">3. Installazione</h2>
+<p>L'applicazione è composta da tre directory: <code>sw/</code> (endpoint dei dispositivi e configurazione),
+<code>legacy/</code> (interfaccia web) e <code>docs/</code> (il presente manuale). Gli esempi riportati di seguito
+eseguono l'installazione nella directory <code>ltx</code> della radice web (document root), per cui gli URL
+hanno la forma <code>http://&lt;server&gt;/ltx/...</code>. È possibile usare qualsiasi altro nome di directory,
+adeguando di conseguenza i percorsi.</p>
+<h3 id="31-linux-con-apache-debianubuntu">3.1 Linux con Apache (Debian/Ubuntu)</h3>
+<pre><code>sudo apt install apache2 php libapache2-mod-php php-gd
+sudo mkdir -p /var/www/html/ltx
+sudo unzip LTX_server_minimal_*.zip -d /var/www/html/        # creates /var/www/html/ltx
+sudo mkdir -p /var/lib/ltx-data
+sudo chown www-data:www-data /var/lib/ltx-data
+sudo chmod 750 /var/lib/ltx-data
+</code></pre>
+<p>Modificare il file <code>/var/www/html/ltx/sw/conf/api_key.inc.php</code> (vedere la sezione 4), quindi
+riavviare Apache (<code>sudo systemctl restart apache2</code>). Su RHEL/Rocky/Alma i pacchetti si chiamano
+<code>httpd php php-gd</code> e l'utente del server web è <code>apache</code>.</p>
+<p>Se la directory dei dati viene mantenuta all'interno della radice web (per impostazione
+predefinita <code>data_secret</code>, accanto a <code>sw/</code>), Apache deve interpretare i file <code>.htaccess</code>:
+impostare <code>AllowOverride All</code> (oppure <code>AuthConfig</code>) per la directory nel virtual host. Il server
+crea automaticamente il file <code>data_secret/.htaccess</code> con la direttiva <code>Require all denied</code>.</p>
+<h3 id="32-linux-con-nginx">3.2 Linux con nginx</h3>
+<pre><code>sudo apt install nginx php-fpm php-gd
+</code></pre>
+<p>Blocco server (sostituire <code>php8.2-fpm</code> con la versione di PHP-FPM in uso):</p>
+<pre><code>server {
+    listen 80;
+    server_name ltx.example.local;
+    root /var/www/html;
+    index index.php;
+
+    location ~ ^/ltx/data_secret/ { deny all; }       # only if the data directory is inside the web root
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/run/php/php8.2-fpm.sock;
+    }
+}
+</code></pre>
+<p>Creare la directory dei dati come nella sezione 3.1 (utente <code>www-data</code>) e ricaricare nginx.</p>
+<h3 id="33-windows-con-xampp">3.3 Windows con XAMPP</h3>
+<ol>
+<li>Installare XAMPP (Apache + PHP 8.x) dal sito apachefriends.org.</li>
+<li>Decomprimere il file ZIP in <code>C:\xampp\htdocs\</code> in modo che esista il file
+   <code>C:\xampp\htdocs\ltx\sw\lxu_v1.php</code>.</li>
+<li>In <code>C:\xampp\php\php.ini</code> verificare che la riga <code>extension=gd</code> sia presente e non commentata
+   (carattere <code>;</code> rimosso). Riavviare Apache dal pannello di controllo di XAMPP.</li>
+<li>Creare una directory dei dati, ad es. <code>C:\ltx-data</code>, e inserirla nella configurazione come
+   <code>C:/ltx-data</code> (barre oblique in avanti).</li>
+<li>Configurare Apache come servizio di Windows (pannello di controllo di XAMPP) in modo che si
+   avvii automaticamente.</li>
+<li>Verificare che l'ora di Windows sia sincronizzata (i datalogger acquisiscono l'ora dal server).</li>
+</ol>
+<h3 id="34-https-opzionale">3.4 HTTPS (opzionale)</h3>
+<p>Configurare HTTPS nel server web nel modo consueto (Apache <code>mod_ssl</code>, nginx <code>ssl_certificate</code>
+oppure un reverse proxy). I datalogger devono accettare il certificato del server: prima di
+passare i datalogger a HTTPS, concordare con TerraTransfer quale certificato (CA pubblica o CA
+propria) venga considerato attendibile dai datalogger. L'interfaccia web può essere utilizzata
+tramite HTTPS senza alcuna modifica.</p>
+<h2 id="4-configurazione">4. Configurazione</h2>
+<p>Tutte le impostazioni si trovano in <code>sw/conf/api_key.inc.php</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Impostazione</th>
+<th>Significato</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>S_DATA</code></td>
+<td>Directory dei dati. Valore predefinito: <code>../data_secret</code> (relativo a <code>sw/</code> e <code>legacy/</code>). Consigliato: un percorso assoluto al di fuori della radice web, ad es. <code>/var/lib/ltx-data</code> oppure <code>C:/ltx-data</code>. L'utente del server web necessita dei permessi di scrittura.</td>
+</tr>
+<tr>
+<td><code>L_KEY</code></td>
+<td>Password dell'interfaccia web. Scegliere una password lunga: è l'unica protezione dell'interfaccia.</td>
+</tr>
+<tr>
+<td><code>D_API_KEY</code></td>
+<td>Chiave del dispositivo. Ogni datalogger invia questa chiave a ogni contatto. Il valore viene concordato con TerraTransfer e memorizzato nei datalogger.</td>
+</tr>
+<tr>
+<td><code>DB_QUOTA</code></td>
+<td>Contenuto iniziale del file <code>quota_days.dat</code> dei nuovi datalogger (giorni, righe). In questa versione ha solo scopo informativo.</td>
+</tr>
+<tr>
+<td><code>MAXM_2GM</code>, <code>MAXM_NB</code>, <code>MXGET_MEM</code></td>
+<td>Dimensione massima del caricamento a ogni contatto per 2G/LTE-M e per LTE-NB, nonché limite multiblocco. Mantenere i valori predefiniti, salvo diversa indicazione di TerraTransfer.</td>
+</tr>
+</tbody>
+</table>
+<p>Il server rifiuta qualsiasi richiesta finché <code>L_KEY</code> o <code>D_API_KEY</code> contengono ancora il segnaposto
+<code>CHANGE_ME</code>.</p>
+<p>Impostazioni di PHP (<code>php.ini</code>): i valori predefiniti sono sufficienti. Per caricare su un
+datalogger, tramite l'interfaccia web, file di dimensioni superiori a 2 MB, aumentare
+<code>upload_max_filesize</code> e <code>post_max_size</code>. Impostare <code>date.timezone = UTC</code> per evitare avvisi.</p>
+<h2 id="5-collegamento-dei-datalogger">5. Collegamento dei datalogger</h2>
+<p>Ogni datalogger richiede le seguenti impostazioni, memorizzate nel relativo file dei parametri di
+sistema (<code>sys_param.lxp</code>) e normalmente configurate da TerraTransfer prima della consegna:</p>
+<ul>
+<li>nome host o indirizzo IP del server, ad es. <code>ltx.example.local</code> oppure <code>192.168.1.10</code>;</li>
+<li>percorso dell'endpoint dei dispositivi: <code>ltx/sw/lxu_v1.php</code> (modificare <code>ltx</code> se l'installazione è avvenuta in un'altra directory);</li>
+<li>chiave del dispositivo (<code>D_API_KEY</code>);</li>
+<li>HTTP o HTTPS, porta 80 o 443.</li>
+</ul>
+<p>Comunicare questi valori a TerraTransfer al momento dell'ordine dei datalogger oppure modificarli
+autonomamente tramite l'interfaccia web (sezione 7.4, file <code>sys_param.lxp</code>). Un valore errato in
+<code>sys_param.lxp</code> scollega il datalogger dal server: modificare quindi questo file con cautela.</p>
+<p><strong>Configurazione sul posto con l'applicazione web Aquatos Field.</strong> Il server non può eseguire la
+configurazione iniziale di un datalogger. La messa in servizio e la manutenzione sul posto si
+effettuano via Bluetooth con l'applicazione web Aquatos Field di TerraTransfer
+(<a href="https://aquatos-field.netlify.app">aquatos-field.netlify.app</a>): configurazione iniziale
+(indirizzo del server, chiave del dispositivo, APN della scheda SIM, intervalli di misura e di
+trasmissione), misure di prova, taratura (azzeramento) dei sensori di livello, lettura della
+memoria del datalogger, autotest e rapporti PDF. L'applicazione funziona nel browser tramite Web
+Bluetooth (Chrome o Edge su desktop e Android, iOS tramite il browser Bluefy) e non richiede
+alcuna installazione. Le modifiche successive ai file dei parametri possono essere effettuate
+anche nell'interfaccia web del server (sezione 7.4); il datalogger le applica al contatto
+successivo.</p>
+<p>Sequenza di contatto: il datalogger chiama <code>http(s)://&lt;server&gt;/ltx/sw/lxu_v1.php?k=&lt;key&gt;&amp;s=&lt;MAC&gt;</code>
+e carica i propri nuovi dati (HTTP POST). La risposta contiene l'ora del server e i comandi in
+attesa. Con le impostazioni predefinite un datalogger esegue una misurazione ogni 15 minuti e
+contatta il server una volta all'ora; entrambi gli intervalli sono parametri del datalogger.</p>
+<h2 id="6-primo-test">6. Primo test</h2>
+<ol>
+<li>Aprire <code>http://&lt;server&gt;/ltx/</code> in un browser. Il browser viene reindirizzato all'interfaccia web.
+   Effettuare il login con <code>L_KEY</code>.</li>
+<li>L'elenco dei dispositivi resta vuoto finché il primo datalogger non ha effettuato un contatto.
+   Il log principale (<code>&lt;S_DATA&gt;/log/log.txt</code>, link "Main Logfile" nella pagina iniziale) mostra
+   ogni contatto, compresi quelli rifiutati, ad es. <code>(ERROR:'API Key')</code> in caso di chiave del
+   dispositivo errata.</li>
+<li>Dopo il primo contatto il datalogger compare nell'elenco con il proprio indirizzo MAC (16 cifre
+   esadecimali) e il proprio nome. Aprire la pagina del dispositivo e controllare "Last Contact" e
+   "Files on Device". I primi contatti trasferiscono l'elenco della directory e i file dei
+   parametri; i dati seguono con il successivo caricamento regolare.</li>
+</ol>
+<h2 id="7-interfaccia-web">7. Interfaccia web</h2>
+<h3 id="71-login-modalita-ospite-e-modalita-demo">7.1 Login, modalità ospite e modalità demo</h3>
+<p><code>legacy/index.php</code> è la pagina iniziale. Senza login la pagina è in modalità ospite (sola lettura)
+e mostra soltanto i datalogger contrassegnati come dispositivi demo ("Enable Demo-Mode" nella
+pagina iniziale dopo il login). Il login con <code>L_KEY</code> consente l'accesso completo; "Logout"
+termina la sessione. Le pagine si aggiornano automaticamente ogni 15–30 secondi.</p>
+<h3 id="72-elenco-dei-dispositivi">7.2 Elenco dei dispositivi</h3>
+<p>Per ogni datalogger l'elenco mostra l'indirizzo MAC (link alla pagina del dispositivo), il nome del
+dispositivo ricavato da <code>iparam.lxp</code>, il "legacy name" (un testo libero impostabile sul server),
+il paese della rete mobile e l'ora dell'ultimo contatto. Il colore dell'ultimo contatto indica da
+quanto tempo esso è avvenuto: verde = meno di 2 minuti, giallo chiaro = più di 2 ore, giallo = più
+di 4 ore, rosa = più di 12 ore, rosa scuro = più di 24 ore, rosso = più di 3 giorni, magenta =
+più di 14 giorni.</p>
+<p>Sotto l'elenco: link al file di log principale, al browser dei file (solo la directory dei dati)
+e alla pagina di informazioni su PHP.</p>
+<h3 id="73-pagina-del-dispositivo">7.3 Pagina del dispositivo</h3>
+<p><strong>Device Info</strong>: nome, legacy name, ultimo contatto con il relativo motivo (AUTO = regolare,
+MANUAL = avviato sul datalogger, RESET, ALARM), scostamento dell'orologio del datalogger, contatori
+delle trasmissioni, versione e data del firmware, tipo di dispositivo, SIM (ICCID), memoria libera
+sul datalogger, segnale della rete mobile (dBm, tipo di rete, paese), posizione, se il datalogger
+ne comunica una, ultimo comando utente e relativo stato. "Last Transmission OK" mostra l'ultima
+conferma di un comando; <code>[OK]</code> la cancella.</p>
+<p><strong>Files on Device</strong>: la directory del datalogger quale risulta dall'ultima scansione della
+directory. <code>[GET DIR]</code> richiede un nuovo elenco della directory al contatto successivo. Per ogni
+file sono indicati lunghezza, data e flag sul dispositivo, nonché lo stato della copia locale
+("mirror") sul server: <code>UP-TO-DATE</code> significa che il server dispone del file completo.</p>
+<ul>
+<li><code>data.edt</code>: <code>[Open local]</code> testo grezzo, <code>[View CSV]</code> conversione in CSV nel browser, <code>[CSV(D)]</code>
+  download con formato numerico tedesco (virgola, punto e virgola), <code>[CSV(Int)]</code> download con
+  punto decimale, <code>[CSVIEW]</code> grafico.</li>
+<li><code>iparam.lxp</code>, <code>sys_param.lxp</code>: <code>[Open local]</code> e <code>[Edit]</code> (sezione 7.4).</li>
+<li><code>[GET(remote)]</code> chiede al datalogger di caricare il file completo al contatto successivo (utile
+  se il mirror è incompleto). <code>[DEL(remote)]</code> elimina il file sul datalogger. Entrambe le richieste
+  vengono messe in coda ed eseguite al contatto successivo; fino ad allora è possibile rimuovere
+  nuovamente le voci dalla coda.</li>
+</ul>
+<p><strong>Cumulative data on server</strong>: <code>out_total/total.edt</code> contiene tutto ciò che il server ha mai
+ricevuto da questo datalogger, in ordine di arrivo. Sono disponibili gli stessi link per
+visualizzazione, download e grafico. Utilizzare questo file per l'archiviazione e per le analisi a
+lungo termine; <code>data.edt</code> è soltanto un mirror del file presente sul datalogger e viene sostituito
+quando il datalogger inizia un nuovo file.</p>
+<p><strong>Files to 'put'</strong>: file in attesa di essere trasferiti al datalogger (sezione 7.4), con il numero
+di tentativi. <code>[Remove]</code> annulla il trasferimento.</p>
+<p><strong>Manage</strong>: link ai file di log del datalogger (contatti, connessioni, comandi utente),
+"Upload Files to Device's Filesystem" (un file qualsiasi, ad es. un file dei parametri già
+preparato), "Send Server Command (Byte)" e "Send User Command (Text)" (comandi definiti dal
+firmware del datalogger; da utilizzare solo su istruzione di TerraTransfer), <code>[Enable DEBUG]</code>
+(memorizza ogni caricamento in forma grezza in <code>dbg/</code>; da disattivare di nuovo dopo la diagnosi).</p>
+<h3 id="74-modifica-dei-file-dei-parametri">7.4 Modifica dei file dei parametri</h3>
+<p><code>[Edit]</code> accanto a <code>iparam.lxp</code> o <code>sys_param.lxp</code> apre un modulo con un campo di immissione per
+ogni riga e una breve descrizione dei campi noti. "Submit" salva il file nella coda <code>put/</code>; il
+datalogger lo riceve al contatto successivo e lo applica. <code>iparam.lxp</code> contiene gli intervalli di
+misurazione e di trasmissione, le definizioni dei canali (unità, cifre decimali, scalatura, soglie
+di allarme) e il nome del dispositivo. <code>sys_param.lxp</code> contiene le impostazioni di rete e del
+server (APN, server, percorso, chiave). Modificare solo i campi di cui si conosce il significato;
+in caso di dubbio rivolgersi a TerraTransfer.</p>
+<h3 id="75-grafici-csview">7.5 Grafici (CSVIEW)</h3>
+<p><code>[CSVIEW]</code> converte il file dei dati in CSV e disegna un grafico (è richiesta l'estensione PHP
+<code>gd</code>). Le caselle di controllo attivano e disattivano i canali, le frecce consentono di scorrere,
+i pulsanti con la lente di ingrandimento eseguono lo zoom, "Export CSV" scarica i dati
+visualizzati. I file CSV temporanei vengono salvati in <code>&lt;S_DATA&gt;/stemp</code> e cancellati
+automaticamente dopo due ore.</p>
+<h2 id="8-memorizzazione-dei-dati">8. Memorizzazione dei dati</h2>
+<h3 id="81-struttura-delle-directory">8.1 Struttura delle directory</h3>
+<pre><code>&lt;S_DATA&gt;/
+  .htaccess                       denies web access (Apache)
+  log/log.txt, _log_old.txt       main log of all contacts (rotated at 100 kB)
+  stemp/                          temporary CSV files of the chart viewer
+  &lt;MAC&gt;/                          one directory per logger, 16 hex digits
+    files/data.edt                mirror of the data file on the logger (EDT format)
+    files/data.edt.bak            previous version of the mirror
+    files/iparam.lxp              parameters of the logger
+    files/sys_param.lxp           system parameters (network, server, key)
+    out_total/total.edt           cumulative data: every received fragment is appended here
+    in_new/                       fragments of the current upload (moved to total.edt at once)
+    cmd/                          metadata of the device files (*.vmeta, *.fmeta), pending commands
+    get/ put/ del/                queues: files to fetch from / send to / delete on the logger
+    dbg/                          raw uploads while debug is enabled
+    device_info.dat               status written at every contact (key/value)
+    log.txt, _log_old.txt         log of this logger (rotated at 50 kB)
+    conn_log.txt                  mobile network information per contact
+    userio.txt                    user commands and replies
+    dapikey.dat                   device key as accepted for this logger
+    quota_days.dat                retention settings (informational)
+    user_info.dat                 legacy name set in the web interface
+    date0.dat                     time of the first contact
+</code></pre>
+<p>Tutti i file sono file di testo semplice, ad eccezione dei caricamenti grezzi in <code>dbg/</code>.</p>
+<h3 id="82-formato-dei-dati-edt">8.2 Formato dei dati EDT</h3>
+<p>EDT ("Easy Data") è un formato di testo semplice, UTF-8, con un record per riga:</p>
+<pre><code>!U 0:cm 1:°C 2:us/cm 90:V(Bat) 91:°C(int) 92:%rH(int)
+!1791806400 0:-43.917045 1:13.50 2:1.23 90:3.638 91:16.3 92:9.4
+!+900 0:-43.917045 1:13.50 2:1.26
+&lt;NT AUTO OK(637,51,0)&gt;
+</code></pre>
+<ul>
+<li><code>!U</code> – unità di misura dei canali; compare all'inizio e ogni volta che i parametri cambiano.</li>
+<li><code>!&lt;seconds&gt;</code> – misurazione con timestamp UTC assoluto (secondi Unix), seguito da coppie
+  <code>channel:value</code>.</li>
+<li><code>!+&lt;seconds&gt;</code> – misurazione relativa alla riga precedente.</li>
+<li>I canali 0–89 sono misurazioni, i canali 90–99 valori di servizio del datalogger (tensione della
+  batteria, temperatura e umidità interne). Una riga contiene soltanto i canali misurati in quel
+  momento.</li>
+<li><code>NoReply</code> al posto di un valore: il sensore non ha risposto. Un valore che inizia con <code>*</code> ha
+  superato una soglia di allarme.</li>
+<li>Le righe che iniziano con <code>&lt;</code> sono eventi: <code>&lt;NT AUTO OK(…)&gt;</code> caricamento, <code>&lt;NT AUTO ERROR …&gt;</code>
+  caricamento non riuscito, <code>&lt;RESET …&gt;</code> riavvio, <code>&lt;COOKIE …&gt;</code> sincronizzazione dell'ora, <code>&lt;NEW&gt;</code>
+  inizio di un file. Dopo un riavvio l'orologio del datalogger riparte da zero fino alla successiva
+  sincronizzazione; tali righe compaiono con date del 1970.</li>
+<li>Le righe che iniziano con <code>$</code> sono record compressi; l'interfaccia web li decodifica.</li>
+</ul>
+<h3 id="83-esportazione-csv">8.3 Esportazione CSV</h3>
+<p>Le visualizzazioni e i download CSV contengono le colonne <code>NO</code> (numero di riga nel file EDT),
+<code>TIME(UTC)</code> (<code>dd.mm.yy hh:mm:ss</code>) e una colonna per ciascun canale, denominata <code>unit(channel)</code>. I
+canali assenti in una riga restano vuoti. <code>[CSV(D)]</code> usa il punto e virgola e la virgola decimale,
+<code>[CSV(Int)]</code> la virgola e il punto decimale. Il parametro URL <code>utc=&lt;seconds&gt;</code> sposta la colonna
+dell'ora, ad es. <code>utc=3600</code> per UTC+1.</p>
+<h2 id="9-gestione-operativa">9. Gestione operativa</h2>
+<p><strong>Backup</strong>: eseguire regolarmente il backup della directory dei dati con un qualsiasi strumento di
+backup dei file. I file vengono scritti a ogni contatto del datalogger; un backup eseguito durante
+un contatto può terminare con un'ultima riga incompleta in <code>total.edt</code>, che il visualizzatore
+mostra come testo; gli altri dati non ne risentono.</p>
+<p><strong>Spazio su disco</strong>: <code>out_total/total.edt</code> cresce senza limiti (circa 2–3 MB per anno e per
+datalogger con intervalli di 15 minuti). Per archiviare il file, spostarlo o troncarlo tra due
+contatti del datalogger; il caricamento successivo prosegue in un nuovo file. Le directory
+<code>stemp/</code> e <code>dbg/</code> possono essere svuotate in qualsiasi momento.</p>
+<p><strong>Monitoraggio</strong>: l'elenco dei dispositivi mostra con un colore da quanto tempo è avvenuto
+l'ultimo contatto. Un datalogger che non contatta il server per più del doppio del proprio
+intervallo di trasmissione va controllato (alimentazione, SIM, segnale). Il log principale mostra i
+contatti rifiutati, ad es. quelli di un datalogger con chiave errata.</p>
+<p><strong>Log</strong>: <code>&lt;S_DATA&gt;/log/log.txt</code> (tutti i contatti, una riga ciascuno, con l'esito e il tempo di
+esecuzione), <code>&lt;MAC&gt;/log.txt</code> (contatti di un singolo datalogger), <code>&lt;MAC&gt;/conn_log.txt</code> (dettagli di
+rete), <code>&lt;MAC&gt;/userio.txt</code> (comandi utente e risposte). I log vengono ruotati
+automaticamente; la versione precedente viene conservata come <code>_…_old.txt</code>.</p>
+<p><strong>Ora</strong>: mantenere sincronizzato l'orologio del server (NTP). I datalogger acquisiscono l'ora del
+server a ogni contatto; un'ora errata del server produce timestamp errati nei dati.</p>
+<p><strong>Aggiornamenti</strong>: per installare una nuova versione, sostituire le directory <code>sw/</code>, <code>legacy/</code> e
+<code>docs/</code>, conservando <code>sw/conf/api_key.inc.php</code> e la directory dei dati. Consultare le note di
+versione per verificare eventuali modifiche alle impostazioni.</p>
+<p><strong>Trasferimento su un altro server</strong>: installare il software sul nuovo server, copiare la
+directory dei dati e la configurazione, quindi modificare l'indirizzo del server nei datalogger
+(sezione 5) oppure reindirizzare il vecchio nome host. I datalogger conservano i propri dati fino
+al successivo caricamento riuscito.</p>
+<h2 id="10-risoluzione-dei-problemi">10. Risoluzione dei problemi</h2>
+<table>
+<thead>
+<tr>
+<th>Sintomo</th>
+<th>Causa / rimedio</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Il browser mostra <code>ERROR: 'Server not configured (sw/conf/api_key.inc.php)'</code></td>
+<td>Nella configurazione sono ancora presenti i segnaposto <code>CHANGE_ME</code>.</td>
+</tr>
+<tr>
+<td>Il datalogger non compare, il log principale mostra <code>(ERROR:'API Key')</code></td>
+<td>La chiave del dispositivo nel datalogger è diversa da <code>D_API_KEY</code>.</td>
+</tr>
+<tr>
+<td>Il datalogger non compare, nel log principale non c'è nulla</td>
+<td>Il datalogger non riesce a raggiungere il server: verificare nome host/IP, percorso, porta, firewall, APN/VPN; verificare le impostazioni del datalogger sul posto con l'applicazione web Aquatos Field (sezione 5); attivare il debug nel datalogger insieme a TerraTransfer.</td>
+</tr>
+<tr>
+<td>Il log principale resta vuoto benché i datalogger contattino il server; nel log degli errori del server web compaiono avvisi PHP <code>mkdir</code>/<code>fopen</code> … <code>Permission denied</code></td>
+<td>La directory dei dati non è scrivibile per l'utente del server web, oppure il percorso <code>S_DATA</code> è errato.</td>
+</tr>
+<tr>
+<td>La pagina del dispositivo mostra <code>(no Directory Scan)</code></td>
+<td>Non è ancora avvenuto alcun contatto completo, oppure i primi contatti non sono andati a buon fine. Usare <code>[GET DIR]</code>.</td>
+</tr>
+<tr>
+<td>Mirror <code>data.edt</code> incompleto (<code>ERROR: Real-Local</code>)</td>
+<td>Usare <code>[GET(remote)]</code> per ottenere l'intero file al contatto successivo.</td>
+</tr>
+<tr>
+<td><code>[CSVIEW]</code> mostra <code>the PHP extension 'gd' is required</code></td>
+<td>Attivare <code>gd</code> in <code>php.ini</code> e riavviare il server web.</td>
+</tr>
+<tr>
+<td>Il login non funziona benché la password sia corretta</td>
+<td>Le sessioni PHP non possono essere memorizzate (<code>session.save_path</code> non scrivibile) oppure i cookie sono bloccati.</td>
+</tr>
+<tr>
+<td>Timestamp del 1970</td>
+<td>Il datalogger è stato riavviato e non ha ancora ricevuto l'ora del server; il problema si risolve al contatto successivo.</td>
+</tr>
+<tr>
+<td>La directory dei dati è raggiungibile dal browser</td>
+<td>Apache: <code>AllowOverride</code> mancante; nginx: aggiungere la location con <code>deny all</code>. Meglio ancora: spostare la directory al di fuori della radice web.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="11-note-sulla-sicurezza">11. Note sulla sicurezza</h2>
+<ul>
+<li>L'interfaccia web dispone di un'unica password con pieni diritti. Limitarne l'accesso (firewall,
+  VPN o un'ulteriore autenticazione nel server web) quando il server è raggiungibile da reti non
+  attendibili.</li>
+<li>I datalogger inviano la chiave del dispositivo a ogni contatto. Utilizzare HTTPS oppure una rete
+  privata (VPN, APN privato).</li>
+<li>Mantenere la directory dei dati al di fuori della radice web oppure protetta dal server web;
+  essa contiene la chiave del dispositivo (<code>dapikey.dat</code>).</li>
+<li>Mantenere aggiornati PHP e il server web.</li>
+</ul>
+</body></html>

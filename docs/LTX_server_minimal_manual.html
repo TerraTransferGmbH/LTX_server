@@ -27,6 +27,8 @@ host; the only network traffic is the loggers calling the server. All data stays
 <p>Not included compared with the full LTX server: dashboard, user management, e-mail or SMS
 alarms, data push to other systems, automatic data retention, firmware updates via the server,
 map view.</p>
+<p>The loggers themselves are commissioned on site via Bluetooth with the Aquatos Field web app
+(section 5); the server only receives their data and passes on parameter files and commands.</p>
 <h2 id="2-requirements">2. Requirements</h2>
 <table>
 <thead>
@@ -165,6 +167,15 @@ Set <code>date.timezone = UTC</code> to avoid warnings.</p>
 <p>Please send these values to TerraTransfer when ordering loggers, or change them yourself via the
 web interface (section 7.4, file <code>sys_param.lxp</code>). A wrong value in <code>sys_param.lxp</code> disconnects
 the logger from the server, so change this file with care.</p>
+<p><strong>On-site configuration with the Aquatos Field web app.</strong> The server cannot perform the initial
+setup of a logger. Commissioning and service on site are done via Bluetooth with the Aquatos Field
+web app from TerraTransfer (<a href="https://aquatos-field.netlify.app">aquatos-field.netlify.app</a>):
+initial configuration (server address, device key, APN of the SIM card, measurement and
+transmission intervals), test measurements, taring (zero adjustment) of level sensors, reading out
+the logger memory, self-test and PDF reports. The app runs in the browser via Web Bluetooth
+(Chrome or Edge on desktop and Android, iOS via the Bluefy browser) and needs no installation.
+Later changes to the parameter files can also be made in the web interface of the server (section
+7.4); the logger applies them at its next contact.</p>
 <p>Contact sequence: the logger calls <code>http(s)://&lt;server&gt;/ltx/sw/lxu_v1.php?k=&lt;key&gt;&amp;s=&lt;MAC&gt;</code> and
 uploads its new data (HTTP POST). The reply contains the server time and pending commands. With
 the default settings a logger measures every 15 minutes and calls the server once per hour; both
@@ -332,7 +343,7 @@ the old host name. Loggers keep their data until the next successful upload.</p>
 </tr>
 <tr>
 <td>Logger does not appear, nothing in the main log</td>
-<td>Logger cannot reach the server: check host name/IP, path, port, firewall, APN/VPN; enable debug in the logger with TerraTransfer.</td>
+<td>Logger cannot reach the server: check host name/IP, path, port, firewall, APN/VPN; check the logger settings on site with the Aquatos Field web app (section 5); enable debug in the logger with TerraTransfer.</td>
 </tr>
 <tr>
 <td>Main log stays empty although loggers call, PHP warnings <code>mkdir</code>/<code>fopen</code> … <code>Permission denied</code> in the web server error log</td>
